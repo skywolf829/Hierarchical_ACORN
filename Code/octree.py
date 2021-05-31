@@ -26,7 +26,7 @@ class OctreeNode:
         "depth: " + str(self.depth) + ", " + \
         "index: " + str(self.index) + "}" 
 
-    def split(self, n_dims):
+    def split(self):
         nodes = []
         k = 0
         for x_quad_start in range(0, self.shape[2], int(self.shape[2]/2)):
@@ -39,7 +39,7 @@ class OctreeNode:
                     y_size = int(self.shape[3]/2)
                 else:
                     y_size = self.shape[3] - int(self.shape[3]/2)
-                if(n_dims == 3):
+                if(len(self.shape) == 5):
                     for z_quad_start in range(0, self.shape[4], int(self.shape[4]/2)):
                         if(z_quad_start == 0):
                             z_size = int(self.shape[4]/2)
@@ -57,7 +57,7 @@ class OctreeNode:
                                 self.pos[2]+z_quad_start
                             ],
                             self.depth+1,
-                            self.index*(2**n_dims) + k
+                            self.index*(2**(len(self.shape)-2)) + k
                         )
                         nodes.append(n_quad)
                         k += 1     
@@ -73,7 +73,7 @@ class OctreeNode:
                             self.pos[1]+y_quad_start,
                         ],
                         self.depth+1,
-                        self.index*(2**n_dims) + k
+                        self.index*(2**(len(self.shape)-2)) + k
                     )
                     nodes.append(n_quad)
                     k += 1       
@@ -95,86 +95,51 @@ class OctreeNode:
 
 class OctreeNodeList:
     def __init__(self, full_shape):
-        self.node_list = [OctreeNode(self, 
-            full_shape, [0, 0] if len(full_shape) == 4 else [0, 0, 0], 0, 0)]
-        self.max_depth = 0
+        self.full_shape = full_shape
+
+        root = OctreeNode(self, 
+            full_shape, [0, 0] if len(full_shape) == 4 else [0, 0, 0], 0, 0)
+
+        self.depth_to_nodes : dict[int, List] = {0: [root]}
 
     def append(self, n : OctreeNode):
-        self.node_list.append(n)
+        if(n.depth not in self.depth_to_nodes):
+            self.depth_to_nodes[n.depth] = []
+        self.depth_to_nodes[n.depth].append(n)        
 
-    def insert(self, i : int, n: OctreeNode):
-        self.node_list.insert(i, n)
-
-    def pop(self, i : int) -> OctreeNode:
-        return self.node_list.pop(i)
-
-    def remove(self, item : OctreeNode) -> bool:
+    def remove(self, n : OctreeNode) -> bool:
         found : bool = False
-        i : int = 0
-        while(i < len(self.node_list) and not found):
-            if(self.node_list[i] is item):
-                self.node_list.pop(i)
-                found = True
-            i += 1
+        if(n.depth in self.depth_to_nodes):
+            i : int = 0
+            while(i < len(self.depth_to_nodes[n.depth]) and not found):
+                if(self.depth_to_nodes[n.depth][i] is n):
+                    self.depth_to_nodes[n.depth].pop(i)
+                    found = True
+                i += 1
         return found
-
-    def split(self, item : OctreeNode):
-        found : bool = False
-        i : int = 0
-        index : int = 0
-        while(i < len(self.node_list) and not found):
-            if(self.node_list[i] is item):
-                found = True
-                index = i
-            i += 1
-        split_nodes = self.node_list[index].split(2 if len(self.data.shape) == 4 else 3)
-
-        for i in range(len(split_nodes)):
-            self.append(split_nodes[i])
     
-    def split_index(self, ind : int):
-        split_nodes = self.node_list[ind].split(2 if len(self.data.shape) == 4 else 3)
+    def split_all_at_depth(self, d):
+        for i in range(len(self.depth_to_nodes[d])):            
+            split_nodes = self.depth_to_nodes[d][i].split()
+            for j in range(len(split_nodes)):
+                self.append(split_nodes[j])
 
-        for i in range(len(split_nodes)):
-            self.append(split_nodes[i])
-
-    def next_depth_level(self):
-        node_indices_to_split = []
-        for i in range(len(self.node_list)):
-            if self.node_list[i].depth == self.max_depth:
-                node_indices_to_split.append(i)
-
-        for i in range(len(node_indices_to_split)):
-            self.split_index(node_indices_to_split[i])
+    def split_from_error_max_depth(self, max_error):
+        max_depth = self.max_depth()
         
-        self.max_depth += 1
-
-    def split_from_error(self, max_error):
-        blocks = self.get_blocks_at_depth(self.max_depth)
-        did_split = False
-        for i in range(len(blocks)):
-            if blocks[i].error > max_error:
-                did_split = True
-                split_nodes = blocks[i].split(2 if len(self.data.shape) == 4 else 3)
+        for i in range(len(self.depth_to_nodes[max_depth])):
+            if self.depth_to_nodes[max_depth][i].error > max_error:
+                split_nodes = self.depth_to_nodes[max_depth][i].split()
                 for j in range(len(split_nodes)):
                     self.append(split_nodes[j])
-        if did_split:
-            self.max_depth += 1
-
-    def get_blocks_at_depth(self, depth_level):
-        blocks = []
-        for i in range(len(self.node_list)):
-            if self.node_list[i].depth == depth_level:
-                blocks.append(self.node_list[i])
-        return blocks
 
     def depth_to_blocks_and_block_positions(self, depth_level):
-        blocks = self.get_blocks_at_depth(depth_level)
+        blocks = self.depth_to_nodes[depth_level]
         block_positions = []
         for i in range(len(blocks)):
             p = []
-            for j in range(len(blocks[i].start_position)):
-                p_i = blocks[i].start_position[j] / self.data.shape[2+j]
+            for j in range(len(blocks[i].pos)):
+                p_i = blocks[i].pos[j] / self.full_shape[2+j]
                 p_i = p_i - 0.5
                 p_i = p_i * 2
                 p_i = p_i + (1/2**depth_level)
@@ -183,37 +148,22 @@ class OctreeNodeList:
         
         return blocks, block_positions
 
-    def __len__(self) -> int:
-        return len(self.node_list)
+    def delete_depth_level(self, depth_level):
+        del self.depth_to_nodes[depth_level]
 
-    def __getitem__(self, key : int) -> OctreeNode:
-        return self.node_list[key]
+    def max_depth(self):
+        return max(list(self.depth_to_nodes.keys()))
 
-    def __str__(self):
-        s : str = "["
-        for i in range(len(self.node_list)):
-            s += str(self.node_list[i])
-            if(i < len(self.node_list)-1):
-                s += ", "
-        s += "]"
-        return s
-
-    def total_size(self):
-        nbytes = 0.0
-        for i in range(len(self.node_list)):
-            nbytes += self.node_list[i].size()
-        return nbytes 
+    def min_depth(self):
+        return min(list(self.depth_to_nodes.keys()))
 
     def save(self, opt):
-        a = self.data
-        self.data = None
         folder_to_save_in = os.path.join(save_folder, opt['save_name'])
         if(not os.path.exists(folder_to_save_in)):
             os.makedirs(folder_to_save_in)
         print("Saving octree to %s" % (folder_to_save_in))
 
         torch.save(self, os.path.join(folder_to_save_in, "octree.data"))
-        self.data = a
     
     def load(self, location):
         self = torch.load(os.path.join(location, "octree.data"))

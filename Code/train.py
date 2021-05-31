@@ -32,7 +32,7 @@ class Trainer():
 
         model = model.to(self.opt['device'])
 
-        model_optim = optim.Adam(model.models[-1].parameters(), lr=self.opt["g_lr"], 
+        model_optim = optim.Adam(model.models[-1].parameters(), lr=self.opt["lr"], 
             betas=(self.opt["beta_1"],self.opt["beta_2"]))
 
         #optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=model_optim,
@@ -41,7 +41,7 @@ class Trainer():
         #    3*self.opt['epochs']/5, 
         #    4*self.opt['epochs']/5],gamma=self.opt['gamma'])
 
-        writer = SummaryWriter(os.path.join('tensorboard_ACORN',self.opt['save_name']))
+        writer = SummaryWriter(os.path.join('tensorboard',self.opt['save_name']))
         
         start_time = time.time()
 
@@ -53,25 +53,20 @@ class Trainer():
         target_PSNR = 40
         MSE_limit = 10 ** ((-1*target_PSNR + 20*log10(1.0))/10)
         
-        octree = OctreeNodeList(item)
-        model.residual = torch.zeros_like(octree.data, device=self.opt['device']).detach()
+        model.init_octree(item.shape)
+        model.residual = torch.zeros_like(item, device=self.opt['device']).detach()
 
         pe = PositionalEncoding(opt)
-
-        num_models = 1
-        octree_subdiv_start = 4
-        for _ in range(octree_subdiv_start):
-            octree.next_depth_level()
             
-        for model_num in range(num_models):
-            for epoch in range(self.opt['epoch_number'], self.opt['epochs']):
-                self.opt["epoch_number"] = epoch            
+        for model_num in range(opt['octree_depth_end'] - opt['octree_depth_start']):
+            for epoch in range(self.opt['epoch'], self.opt['epochs']):
+                self.opt["epoch"] = epoch            
                 model.zero_grad()            
 
                 block_error_sum = 0
 
-                blocks, block_positions = octree.depth_to_blocks_and_block_positions(
-                        octree_subdiv_start + model_num)
+                blocks, block_positions = model.octree.depth_to_blocks_and_block_positions(
+                        model.octree.max_depth())
                 block_positions = torch.tensor(block_positions, 
                         device=self.opt['device'])
                 block_positions = pe(block_positions)
@@ -92,20 +87,20 @@ class Trainer():
 
                     if('2D' in opt['mode']):
                         block_output += model.residual[:,:,
-                            blocks[b].start_position[0]:blocks[b].start_position[0]+block_output.shape[2],
-                            blocks[b].start_position[1]:blocks[b].start_position[1]+block_output.shape[3]].detach()
+                            blocks[b].pos[0]:blocks[b].pos[0]+block_output.shape[2],
+                            blocks[b].pos[1]:blocks[b].pos[1]+block_output.shape[3]].detach()
                         block_item = item[:,:,
-                            blocks[b].start_position[0]:blocks[b].start_position[0]+block_output.shape[2],
-                            blocks[b].start_position[1]:blocks[b].start_position[1]+block_output.shape[3]]
+                            blocks[b].pos[0]:blocks[b].pos[0]+block_output.shape[2],
+                            blocks[b].pos[1]:blocks[b].pos[1]+block_output.shape[3]]
                     else:
                         block_output += model.residual[:,:,
-                            blocks[b].start_position[0]:blocks[b].start_position[0]+block_output.shape[2],
-                            blocks[b].start_position[1]:blocks[b].start_position[1]+block_output.shape[3],
-                            blocks[b].start_position[2]:blocks[b].start_position[2]+block_output.shape[4]].detach()
+                            blocks[b].pos[0]:blocks[b].pos[0]+block_output.shape[2],
+                            blocks[b].pos[1]:blocks[b].pos[1]+block_output.shape[3],
+                            blocks[b].pos[2]:blocks[b].pos[2]+block_output.shape[4]].detach()
                         block_item = item[:,:,
-                            blocks[b].start_position[0]:blocks[b].start_position[0]+block_output.shape[2],
-                            blocks[b].start_position[1]:blocks[b].start_position[1]+block_output.shape[3],
-                            blocks[b].start_position[2]:blocks[b].start_position[2]+block_output.shape[4]]
+                            blocks[b].pos[0]:blocks[b].pos[0]+block_output.shape[2],
+                            blocks[b].pos[1]:blocks[b].pos[1]+block_output.shape[3],
+                            blocks[b].pos[2]:blocks[b].pos[2]+block_output.shape[4]]
 
                     block_error = loss(block_output,block_item) * (1/len(blocks))
                     block_error.backward(retain_graph=True)
@@ -119,7 +114,7 @@ class Trainer():
                 
                 if(step % 100 == 0):
                     with torch.no_grad():    
-                        reconstructed = model.get_full_img(octree)                    
+                        reconstructed = model.get_full_img()                    
                         psnr = PSNR(reconstructed, item, torch.tensor(1.0))
                         s = ssim(reconstructed, item)
                         print("Iteration %i, MSE: %0.04f, PSNR (dB): %0.02f, SSIM: %0.02f" % \
@@ -138,22 +133,21 @@ class Trainer():
             
                 if(epoch % self.opt['save_every'] == 0):
                     save_model(model, self.opt)
-                    octree.save(self.opt)
                     print("Saved model and octree")
 
-            if(model_num < num_models-1):
+            if(model_num < opt['octree_depth_end'] - opt['octree_depth_start']-1):
                 print("Adding higher-resolution model")   
                 with torch.no_grad():                                    
-                    model.residual = model.get_full_img(octree).detach()
-                    model.calculate_block_errors(octree, loss)
+                    model.residual = model.get_full_img().detach()
+                    model.calculate_block_errors(loss, item)
                 model.add_model(opt)
                 model.to(opt['device'])
                 print("Last error: " + str(block_error_sum.item()))
                 #model.errors.append(block_error_sum.item()**0.5)
                 model.errors.append(1.0)
                 #octree.next_depth_level()
-                octree.split_from_error(MSE_limit)
-                model_optim = optim.Adam(model.models[-1].parameters(), lr=self.opt["g_lr"], 
+                model.octree.split_from_error_max_depth(MSE_limit)
+                model_optim = optim.Adam(model.models[-1].parameters(), lr=self.opt["lr"], 
                     betas=(self.opt["beta_1"],self.opt["beta_2"]))
                 #optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=model_optim,
                 #    milestones=[self.opt['epochs']/5, 
@@ -162,7 +156,7 @@ class Trainer():
                 #    4*self.opt['epochs']/5],gamma=self.opt['gamma'])
                 for param in model.models[-2].parameters():
                     param.requires_grad = False
-                self.opt['epoch_number'] = 0
+                self.opt['epoch'] = 0
                 torch.cuda.empty_cache()
        
 

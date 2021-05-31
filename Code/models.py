@@ -29,8 +29,9 @@ def save_model(model, opt):
     print("Saving model to %s" % (folder_to_save_in))
     
     model_state = model.state_dict()
-    torch.save(model_state, os.path.join(folder_to_save_in, "model.ckpt"))
 
+    torch.save(model_state, os.path.join(folder_to_save_in, "model.ckpt"))
+    model.octree.save(opt)
     save_options(opt, folder_to_save_in)
 
 def load_model(opt, device):
@@ -190,87 +191,91 @@ class HierarchicalACORN(nn.Module):
         self.models = nn.ModuleList([ACORN(int(2**(6.54)), opt)])
         self.errors = [1]
         self.residual = None
-    
+        self.octree : OctreeNodeList = None
+        
     def init_octree(self, data_shape):
         self.octree = OctreeNodeList(data_shape)
-        
+        for i in range(self.opt['octree_depth_start']):
+            self.octree.split_all_at_depth(i)
+            self.octree.delete_depth_level(i)
+
     def add_model(self, opt):
         self.models.append(ACORN(int(2**(len(self.models)*0.5+6)), opt))
 
-    def forward(self, block, block_position, model_no):        
+    def forward(self, block, block_position, model_no):
         block_output = self.models[model_no](block_position, block, self.errors[-1])
         return block_output
 
-    def calculate_block_errors(self, octree, error_func):
-        blocks, block_positions = octree.depth_to_blocks_and_block_positions(
-                octree.max_depth)
+    def calculate_block_errors(self, error_func, item):
+        blocks, block_positions = self.octree.depth_to_blocks_and_block_positions(
+                self.octree.max_depth())
         block_positions = torch.tensor(block_positions, 
                 device=self.opt['device'])
         block_outputs = self.models[-1].forward_batch(block_positions, blocks, self.errors[-1])
         for b in range(len(blocks)):
             if('2D' in self.opt['mode']):
                 block_outputs[b] += self.residual[:,:,
-                    blocks[b].start_position[0]:\
-                        blocks[b].start_position[0]+block_outputs[b].shape[2],
-                    blocks[b].start_position[1]:\
-                        blocks[b].start_position[1]+block_outputs[b].shape[3]]
+                    blocks[b].pos[0]:\
+                        blocks[b].pos[0]+block_outputs[b].shape[2],
+                    blocks[b].pos[1]:\
+                        blocks[b].pos[1]+block_outputs[b].shape[3]]
             else:
                block_outputs[b] +=  self.residual[:,:,
-                    blocks[b].start_position[0]:\
-                        blocks[b].start_position[0]+block_outputs[b].shape[2],
-                    blocks[b].start_position[1]:\
-                        blocks[b].start_position[1]+block_outputs[b].shape[3],                    
-                    blocks[b].start_position[2]:\
-                        blocks[b].start_position[2]+block_outputs[b].shape[4]]
-            error = error_func(block_outputs[b], blocks[b].data())
+                    blocks[b].pos[0]:\
+                        blocks[b].pos[0]+block_outputs[b].shape[2],
+                    blocks[b].pos[1]:\
+                        blocks[b].pos[1]+block_outputs[b].shape[3],                    
+                    blocks[b].pos[2]:\
+                        blocks[b].pos[2]+block_outputs[b].shape[4]]
+            error = error_func(block_outputs[b], blocks[b].data(item))
             blocks[b].error = error.item()
 
-    def get_full_img(self, octree):
-        blocks, block_positions = octree.depth_to_blocks_and_block_positions(
-                octree.max_depth)
+    def get_full_img(self):
+        blocks, block_positions = self.octree.depth_to_blocks_and_block_positions(
+                self.octree.max_depth())
         block_positions = torch.tensor(block_positions, 
                 device=self.opt['device'])
-        out = torch.zeros_like(octree.data, device=self.opt['device'])
+        out = torch.zeros(self.octree.full_shape, dtype=torch.float32, device=self.opt['device'])
         out += self.residual
         block_outputs = self.models[-1].forward_batch(block_positions, blocks, self.errors[-1])
         for b in range(len(blocks)):
             if('2D' in self.opt['mode']):
                 out[:,:,
-                    blocks[b].start_position[0]:\
-                        blocks[b].start_position[0]+block_outputs[b].shape[2],
-                    blocks[b].start_position[1]:\
-                        blocks[b].start_position[1]+block_outputs[b].shape[3]] += block_outputs[b]
+                    blocks[b].pos[0]:\
+                        blocks[b].pos[0]+block_outputs[b].shape[2],
+                    blocks[b].pos[1]:\
+                        blocks[b].pos[1]+block_outputs[b].shape[3]] += block_outputs[b]
             else:
                out[:,:,
-                    blocks[b].start_position[0]:\
-                        blocks[b].start_position[0]+block_outputs[b].shape[2],
-                    blocks[b].start_position[1]:\
-                        blocks[b].start_position[1]+block_outputs[b].shape[3],                    
-                    blocks[b].start_position[2]:\
-                        blocks[b].start_position[2]+block_outputs[b].shape[4]] += block_outputs[b]
+                    blocks[b].pos[0]:\
+                        blocks[b].pos[0]+block_outputs[b].shape[2],
+                    blocks[b].pos[1]:\
+                        blocks[b].pos[1]+block_outputs[b].shape[3],                    
+                    blocks[b].pos[2]:\
+                        blocks[b].pos[2]+block_outputs[b].shape[4]] += block_outputs[b]
         return out
 
     def get_full_img_no_residual(self, octree):
         blocks, block_positions = octree.depth_to_blocks_and_block_positions(
-                octree.max_depth)
+                octree.max_depth())
         block_positions = torch.tensor(block_positions, 
                 device=self.opt['device'])
-        out = torch.zeros_like(octree.data, device=self.opt['device'])
+        out = torch.zeros(octree.full_shape, dtype=torch.float32, device=self.opt['device'])
         out += self.residual
         block_outputs = self.models[-1].forward_batch(block_positions, blocks, self.errors[-1])
         for b in range(len(blocks)):
             if('2D' in self.opt['mode']):
                 out[:,:,
-                    blocks[b].start_position[0]:\
-                        blocks[b].start_position[0]+block_outputs[b].shape[2],
-                    blocks[b].start_position[1]:\
-                        blocks[b].start_position[1]+block_outputs[b].shape[3]] += block_outputs[b]
+                    blocks[b].pos[0]:\
+                        blocks[b].pos[0]+block_outputs[b].shape[2],
+                    blocks[b].pos[1]:\
+                        blocks[b].pos[1]+block_outputs[b].shape[3]] += block_outputs[b]
             else:
                out[:,:,
-                    blocks[b].start_position[0]:\
-                        blocks[b].start_position[0]+block_outputs[b].shape[2],
-                    blocks[b].start_position[1]:\
-                        blocks[b].start_position[1]+block_outputs[b].shape[3],                    
-                    blocks[b].start_position[2]:\
-                        blocks[b].start_position[2]+block_outputs[b].shape[4]] += block_outputs[b]
+                    blocks[b].pos[0]:\
+                        blocks[b].pos[0]+block_outputs[b].shape[2],
+                    blocks[b].pos[1]:\
+                        blocks[b].pos[1]+block_outputs[b].shape[3],                    
+                    blocks[b].pos[2]:\
+                        blocks[b].pos[2]+block_outputs[b].shape[4]] += block_outputs[b]
         return out
