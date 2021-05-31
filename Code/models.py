@@ -1,3 +1,4 @@
+from octree import OctreeNodeList
 from matplotlib.pyplot import xcorr
 import torch
 import torch.nn as nn
@@ -188,8 +189,10 @@ class HierarchicalACORN(nn.Module):
         self.opt = opt
         self.models = nn.ModuleList([ACORN(int(2**(6.54)), opt)])
         self.errors = [1]
-        self.octree = None
         self.residual = None
+    
+    def init_octree(self, data_shape):
+        self.octree = OctreeNodeList(data_shape)
         
     def add_model(self, opt):
         self.models.append(ACORN(int(2**(len(self.models)*0.5+6)), opt))
