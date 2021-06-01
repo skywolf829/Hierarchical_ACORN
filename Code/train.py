@@ -26,11 +26,22 @@ class Trainer():
         torch.manual_seed(0b10101010101010101010101010101010)
 
     #@profile
-    def train(self, model, item):
-        
-        print("Training on " + self.opt['device'])
-
-        model = model.to(self.opt['device'])
+    def train(self, rank, model, item):
+        if(self.opt['train_distributed']):
+            self.opt['device'] = "cuda:" + str(rank)
+            dist.init_process_group(                                   
+                backend='nccl',                                         
+                init_method='env://',                                   
+                world_size = self.opt['num_nodes'] * self.opt['gpus_per_node'],                              
+                rank=rank                                               
+            )
+            model = model.to(rank)
+            model = DDP(model, device_ids=[rank])
+            if(rank == 0): 
+                print("Training in parallel")
+        else:
+            print("Training on " + self.opt['device'])
+            model = model.to(self.opt['device'])
 
         model_optim = optim.Adam(model.models[-1].parameters(), lr=self.opt["lr"], 
             betas=(self.opt["beta_1"],self.opt["beta_2"]))
@@ -41,7 +52,8 @@ class Trainer():
         #    3*self.opt['epochs']/5, 
         #    4*self.opt['epochs']/5],gamma=self.opt['gamma'])
 
-        writer = SummaryWriter(os.path.join('tensorboard',self.opt['save_name']))
+        if(not self.opt['train_distributed'] or rank == 0):
+            writer = SummaryWriter(os.path.join('tensorboard',self.opt['save_name']))
         start_time = time.time()
 
         loss = nn.MSELoss().to(self.opt["device"])
@@ -55,9 +67,9 @@ class Trainer():
         model.init_octree(item.shape)
         model.residual = torch.zeros_like(item, device=self.opt['device']).detach()
 
-        pe = PositionalEncoding(opt)
+        pe = PositionalEncoding(self.opt)
             
-        for model_num in range(opt['octree_depth_end'] - opt['octree_depth_start']):
+        for model_num in range(self.opt['octree_depth_end'] - self.opt['octree_depth_start']):
             for epoch in range(self.opt['epoch'], self.opt['epochs']):
                 self.opt["epoch"] = epoch            
                 model.zero_grad()            
@@ -65,7 +77,9 @@ class Trainer():
                 block_error_sum = 0
 
                 blocks, block_positions = model.octree.depth_to_blocks_and_block_positions(
-                        model.octree.max_depth())
+                        model.octree.max_depth(), 
+                        rank, 
+                        self.opt['gpus_per_node']*self.opt['num_nodes'] if self.opt['train_distributed'] else 1)
                 block_positions = torch.tensor(block_positions, 
                         device=self.opt['device'])
                 block_positions = pe(block_positions)
@@ -84,7 +98,7 @@ class Trainer():
                     #block_output = checkpoint_sequential(model.models[-1].feature_decoder, 1, block_output)                    
                     block_output = model.models[-1].feature_decoder(block_output)
 
-                    if('2D' in opt['mode']):
+                    if('2D' in self.opt['mode']):
                         block_output += model.residual[:,:,
                             blocks[b].pos[0]:blocks[b].pos[0]+block_output.shape[2],
                             blocks[b].pos[1]:blocks[b].pos[1]+block_output.shape[3]].detach()
@@ -112,10 +126,10 @@ class Trainer():
                 model_optim.step()
                 #optim_scheduler.step()
                 
-                if(step % 100 == 0):
+                if(step % 100 == 0 and (not self.opt['train_distributed'] or rank == 0)):
                     with torch.no_grad():    
                         reconstructed = model.get_full_img()    
-                        octree_blocks = model.octree.get_octree_block_img(opt['device'])            
+                        octree_blocks = model.octree.get_octree_block_img(self.opt['device'])            
                         psnr = PSNR(reconstructed, item, torch.tensor(1.0))
                         s = ssim(reconstructed, item)
                         print("Iteration %i, MSE: %0.04f, PSNR (dB): %0.02f, SSIM: %0.02f" % \
@@ -131,46 +145,49 @@ class Trainer():
                         writer.add_image("reconstruction", reconstructed[0].clamp_(0, 1), step)
                         writer.add_image("reconstruction_blocks", reconstructed[0].clamp_(0, 1)*octree_blocks[0], step)
 
-                elif(step % 5 == 0):
+                elif(step % 5 == 0 and (not self.opt['train_distributed'] or rank == 0)):
                     print("Iteration %i, MSE: %0.04f" % \
                             (epoch, block_error_sum.item()))
                 step += 1
             
-                if(epoch % self.opt['save_every'] == 0):
+                if(epoch % self.opt['save_every'] == 0 and (not self.opt['train_distributed'] or rank == 0)):
                     save_model(model, self.opt)
                     print("Saved model and octree")
-            
-            with torch.no_grad():    
-                reconstructed = model.get_full_img()    
-                octree_blocks = model.octree.get_octree_block_img(opt['device'])          
-                psnr = PSNR(reconstructed, item, torch.tensor(1.0))
-                s = ssim(reconstructed, item)
-                print("Iteration %i, MSE: %0.04f, PSNR (dB): %0.02f, SSIM: %0.02f" % \
-                    (epoch, block_error_sum.item(), psnr.item(), s.item()))
-                #writer.add_scalar('MSE', block_error_sum.item(), step)
-                writer.add_scalar('PSNR_over_epochs', psnr.item(), step)
-                writer.add_scalar('SSIM_over_epochs', s.item(), step)
-                writer.add_scalar('PSNR_over_time', psnr.item(), int(time.time()-start_time))
-                writer.add_scalar('SSIM_over_time', s.item(), int(time.time()-start_time))             
-                if(len(model.models) > 1):
-                    writer.add_image("Network"+str(len(model.models)-1)+"residual", 
-                        ((reconstructed-model.residual)[0]+0.5).clamp_(0, 1), step)
-                writer.add_image("reconstruction", reconstructed[0].clamp_(0, 1), step)
-                writer.add_image("reconstruction_blocks", reconstructed[0].clamp_(0, 1)*octree_blocks[0], step)
+                    
+            if(not self.opt['train_distributed'] or rank == 0):
+                with torch.no_grad():    
+                    reconstructed = model.get_full_img()    
+                    octree_blocks = model.octree.get_octree_block_img(self.opt['device'])          
+                    psnr = PSNR(reconstructed, item, torch.tensor(1.0))
+                    s = ssim(reconstructed, item)
+                    print("Iteration %i, MSE: %0.04f, PSNR (dB): %0.02f, SSIM: %0.02f" % \
+                        (epoch, block_error_sum.item(), psnr.item(), s.item()))
+                    #writer.add_scalar('MSE', block_error_sum.item(), step)
+                    writer.add_scalar('PSNR_over_epochs', psnr.item(), step)
+                    writer.add_scalar('SSIM_over_epochs', s.item(), step)
+                    writer.add_scalar('PSNR_over_time', psnr.item(), int(time.time()-start_time))
+                    writer.add_scalar('SSIM_over_time', s.item(), int(time.time()-start_time))             
+                    if(len(model.models) > 1):
+                        writer.add_image("Network"+str(len(model.models)-1)+"residual", 
+                            ((reconstructed-model.residual)[0]+0.5).clamp_(0, 1), step)
+                    writer.add_image("reconstruction", reconstructed[0].clamp_(0, 1), step)
+                    writer.add_image("reconstruction_blocks", reconstructed[0].clamp_(0, 1)*octree_blocks[0], step)
 
-            if(model_num < opt['octree_depth_end'] - opt['octree_depth_start']-1):
+
+            if((not self.opt['train_distributed'] or rank == 0) and \
+                model_num < self.opt['octree_depth_end'] - self.opt['octree_depth_start']-1):
                 print("Adding higher-resolution model")   
                 with torch.no_grad():                                    
                     model.residual = model.get_full_img().detach()
                     model.calculate_block_errors(loss, item)
-                model.add_model(torch.tensor([1.0], dtype=torch.float32, device=opt['device']))
-                model.to(opt['device'])
+                model.add_model(torch.tensor([1.0], dtype=torch.float32, device=self.opt['device']))
+                model.to(self.opt['device'])
 
                 print("Last error: " + str(block_error_sum.item()))
                 #model.errors.append(block_error_sum.item()**0.5)
 
-                model.octree.split_from_error_max_depth(MSE_limit)
-                #model.octree.split_all_at_depth(model.octree.max_depth())
+                #model.octree.split_from_error_max_depth(MSE_limit)
+                model.octree.split_all_at_depth(model.octree.max_depth())
 
                 model_optim = optim.Adam(model.models[-1].parameters(), lr=self.opt["lr"], 
                     betas=(self.opt["beta_1"],self.opt["beta_2"]))
@@ -184,12 +201,14 @@ class Trainer():
                 self.opt['epoch'] = 0
                 torch.cuda.empty_cache()
        
+        if(not self.opt['train_distributed'] or rank == 0):
+            end_time = time.time()
+            total_time = end_time - start_time
+            print("Time to train: %0.01f minutes" % (total_time/60))
+            save_model(model, self.opt)
+            print("Saved model")
 
-        end_time = time.time()
-        total_time = end_time - start_time
-        print("Time to train: %0.01f minutes" % (total_time/60))
-        save_model(model, self.opt)
-        print("Saved model")
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train on an input that is 2D')
@@ -244,7 +263,10 @@ if __name__ == '__main__':
         model = HierarchicalACORN(opt)
 
     trainer = Trainer(opt)
-    trainer.train(model, item)
+
+    if(not opt['train_distributed']):
+        trainer.train(0, model, item)
+    else:
 
     print(prof.display())
     prof.disable()

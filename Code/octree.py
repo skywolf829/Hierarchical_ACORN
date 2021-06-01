@@ -144,7 +144,7 @@ class OctreeNodeList:
                 for j in range(len(split_nodes)):
                     self.append(split_nodes[j])
 
-    def depth_to_blocks_and_block_positions(self, depth_level):
+    def depth_to_blocks_and_block_positions(self, depth_level, rank=0, num_splits=1):
         blocks = self.depth_to_nodes[depth_level]
         block_positions = []
         for i in range(len(blocks)):
@@ -157,7 +157,7 @@ class OctreeNodeList:
                 p.append(p_i)
             block_positions.append(p)
         
-        return blocks, block_positions
+        return blocks[rank::num_splits], block_positions[rank::num_splits]
 
     def delete_depth_level(self, depth_level):
         del self.depth_to_nodes[depth_level]

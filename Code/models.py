@@ -199,7 +199,7 @@ class HierarchicalACORN(nn.Module):
     def __init__(self, opt):
         super(HierarchicalACORN, self).__init__()        
         self.opt = opt
-        self.models = nn.ModuleList([ACORN(int(2**(3)), opt)])
+        self.models = nn.ModuleList([ACORN(int(2**(7.1)), opt)])
         self.register_buffer("RMSE", torch.tensor([1], dtype=torch.float32, device=opt['device']))
         self.residual = None
         self.octree : OctreeNodeList = None
