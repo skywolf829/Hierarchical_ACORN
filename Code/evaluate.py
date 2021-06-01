@@ -6,19 +6,17 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.tensorboard import SummaryWriter
 import time
-import torch.optim as optim
 import os
-from models import save_model
+from models import load_model, save_model
 import numpy as np
 from octree import OctreeNodeList
 from options import *
-from datasets import LocalImplicitDataset
 from models import HierarchicalACORN, PositionalEncoding
-import argparse
+import h5py
 from pytorch_memlab import LineProfiler, MemReporter, profile
 from torch.utils.checkpoint import checkpoint_sequential, checkpoint
+import imageio
 
 if __name__ == '__main__':
     
@@ -29,22 +27,24 @@ if __name__ == '__main__':
     output_folder = os.path.join(project_folder_path, "Output")
     save_folder = os.path.join(project_folder_path, "SavedModels")
     
-    load_from = "temp"
+    load_from = "Snick_4levels_dynamic_error"
 
     opt = load_options(os.path.join(save_folder, load_from))
     opt["device"] = "cuda:0"
     opt["save_name"] = load_from
 
-    dataset = LocalImplicitDataset(opt)
-    model = HierarchicalACORN(opt)
-    model_params = torch.load(os.path.join(os.path.join(save_folder, load_from), "model.ckpt"),
-        map_location="cuda:0")
-    item = dataset[0].unsqueeze(0).to(opt['device'])
-    octree = OctreeNodeList(item)
-    octree = octree.load(os.path.join(save_folder, load_from))
-    octree.data = item
-    model.load_state_dict(model_params)
+    item = h5py.File(os.path.join(project_folder_path, opt['target_signal']), 'r')['data']
+    item = torch.tensor(item).unsqueeze(0).to(opt['device'])
 
-    print("Everything loaded")
+    model = load_model(opt, opt['device'])
 
-    img = model.get_full_img(octree)
+    img = model.get_full_img_no_residual()
+    octree_blocks = model.octree.get_octree_block_img()
+
+    img *= octree_blocks.to(opt['device'])
+
+    print(img.shape)
+
+    img = img.detach()[0].permute(1, 2, 0).cpu().numpy()
+    imageio.imwrite("test.png", img)
+

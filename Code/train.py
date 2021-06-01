@@ -42,7 +42,6 @@ class Trainer():
         #    4*self.opt['epochs']/5],gamma=self.opt['gamma'])
 
         writer = SummaryWriter(os.path.join('tensorboard',self.opt['save_name']))
-        
         start_time = time.time()
 
         loss = nn.MSELoss().to(self.opt["device"])
@@ -103,6 +102,7 @@ class Trainer():
                             blocks[b].pos[2]:blocks[b].pos[2]+block_output.shape[4]]
 
                     block_error = loss(block_output,block_item) * (1/len(blocks))
+                    blocks[b].last_loss = block_error.detach().item() 
                     block_error.backward(retain_graph=True)
                     block_error_sum += block_error.detach()
                     
@@ -114,18 +114,23 @@ class Trainer():
                 
                 if(step % 100 == 0):
                     with torch.no_grad():    
-                        reconstructed = model.get_full_img()                    
+                        reconstructed = model.get_full_img()    
+                        octree_blocks = model.octree.get_octree_block_img(opt['device'])            
                         psnr = PSNR(reconstructed, item, torch.tensor(1.0))
                         s = ssim(reconstructed, item)
                         print("Iteration %i, MSE: %0.04f, PSNR (dB): %0.02f, SSIM: %0.02f" % \
                             (epoch, block_error_sum.item(), psnr.item(), s.item()))
-                        writer.add_scalar('MSE', block_error_sum.item(), step)
-                        writer.add_scalar('PSNR', psnr.item(), step)
-                        writer.add_scalar('SSIM', s.item(), step)             
+                        #writer.add_scalar('MSE', block_error_sum.item(), step)
+                        writer.add_scalar('PSNR_over_epochs', psnr.item(), step)
+                        writer.add_scalar('SSIM_over_epochs', s.item(), step)
+                        writer.add_scalar('PSNR_over_time', psnr.item(), int(time.time()-start_time))
+                        writer.add_scalar('SSIM_over_time', s.item(), int(time.time()-start_time))             
                         if(len(model.models) > 1):
                             writer.add_image("Network"+str(len(model.models)-1)+"residual", 
                                 ((reconstructed-model.residual)[0]+0.5).clamp_(0, 1), step)
                         writer.add_image("reconstruction", reconstructed[0].clamp_(0, 1), step)
+                        writer.add_image("reconstruction_blocks", reconstructed[0].clamp_(0, 1)*octree_blocks[0], step)
+
                 elif(step % 5 == 0):
                     print("Iteration %i, MSE: %0.04f" % \
                             (epoch, block_error_sum.item()))
@@ -134,19 +139,39 @@ class Trainer():
                 if(epoch % self.opt['save_every'] == 0):
                     save_model(model, self.opt)
                     print("Saved model and octree")
+            
+            with torch.no_grad():    
+                reconstructed = model.get_full_img()    
+                octree_blocks = model.octree.get_octree_block_img(opt['device'])          
+                psnr = PSNR(reconstructed, item, torch.tensor(1.0))
+                s = ssim(reconstructed, item)
+                print("Iteration %i, MSE: %0.04f, PSNR (dB): %0.02f, SSIM: %0.02f" % \
+                    (epoch, block_error_sum.item(), psnr.item(), s.item()))
+                #writer.add_scalar('MSE', block_error_sum.item(), step)
+                writer.add_scalar('PSNR_over_epochs', psnr.item(), step)
+                writer.add_scalar('SSIM_over_epochs', s.item(), step)
+                writer.add_scalar('PSNR_over_time', psnr.item(), int(time.time()-start_time))
+                writer.add_scalar('SSIM_over_time', s.item(), int(time.time()-start_time))             
+                if(len(model.models) > 1):
+                    writer.add_image("Network"+str(len(model.models)-1)+"residual", 
+                        ((reconstructed-model.residual)[0]+0.5).clamp_(0, 1), step)
+                writer.add_image("reconstruction", reconstructed[0].clamp_(0, 1), step)
+                writer.add_image("reconstruction_blocks", reconstructed[0].clamp_(0, 1)*octree_blocks[0], step)
 
             if(model_num < opt['octree_depth_end'] - opt['octree_depth_start']-1):
                 print("Adding higher-resolution model")   
                 with torch.no_grad():                                    
                     model.residual = model.get_full_img().detach()
                     model.calculate_block_errors(loss, item)
-                model.add_model(opt)
+                model.add_model(torch.tensor([1.0], dtype=torch.float32, device=opt['device']))
                 model.to(opt['device'])
+
                 print("Last error: " + str(block_error_sum.item()))
                 #model.errors.append(block_error_sum.item()**0.5)
-                model.errors.append(1.0)
-                #octree.next_depth_level()
+
                 model.octree.split_from_error_max_depth(MSE_limit)
+                #model.octree.split_all_at_depth(model.octree.max_depth())
+
                 model_optim = optim.Adam(model.models[-1].parameters(), lr=self.opt["lr"], 
                     betas=(self.opt["beta_1"],self.opt["beta_2"]))
                 #optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=model_optim,

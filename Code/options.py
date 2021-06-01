@@ -20,14 +20,14 @@ class Options():
         opt['num_positional_encoding_terms'] = 6
 
         opt["octree_depth_start"]      = 0
-        opt["octree_depth_end"]        = 4
+        opt["octree_depth_end"]        = 6
 
         opt["train_distributed"]       = False
         opt["gpus_per_node"]           = 8
         opt["num_nodes"]               = 1
         opt["ranking"]                 = 0
 
-        opt["epochs"]                  = 1000
+        opt["epochs"]                  = 2500
         opt["lr"]                      = 0.001
         opt["beta_1"]                  = 0.5
         opt["beta_2"]                  = 0.999

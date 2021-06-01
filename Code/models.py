@@ -36,13 +36,24 @@ def save_model(model, opt):
 
 def load_model(opt, device):
     model = HierarchicalACORN(opt)
+    
     folder_to_load_from = os.path.join(save_folder, opt['save_name'])
-
     if not os.path.exists(folder_to_load_from):
         print("%s doesn't exist, load failed" % folder_to_load_from)
         return
 
-    from collections import OrderedDict
+    
+    if os.path.exists(os.path.join(folder_to_load_from, "octree.data")):
+        model.octree = OctreeNodeList.load(folder_to_load_from)
+        print("Successfully loaded octree")
+    else:
+        print("Warning: no octree associated with model")
+
+    for _ in range(model.octree.max_depth() - model.octree.min_depth()):
+        model.add_model(torch.tensor([1.0], dtype=torch.float32, device=opt['device']))
+    
+    model.to(device)
+
     if os.path.exists(os.path.join(folder_to_load_from, "model.ckpt")):
         model_params = torch.load(os.path.join(folder_to_load_from, "model.ckpt"),
             map_location=device)
@@ -50,7 +61,7 @@ def load_model(opt, device):
         print("Successfully loaded model")
     else:
         print("Warning: model.ckpt doesn't exists - can't load these model parameters")
-   
+    
     return model
 
 class PositionalEncoding(nn.Module):
@@ -188,8 +199,8 @@ class HierarchicalACORN(nn.Module):
     def __init__(self, opt):
         super(HierarchicalACORN, self).__init__()        
         self.opt = opt
-        self.models = nn.ModuleList([ACORN(int(2**(6.54)), opt)])
-        self.errors = [1]
+        self.models = nn.ModuleList([ACORN(int(2**(3)), opt)])
+        self.register_buffer("RMSE", torch.tensor([1], dtype=torch.float32, device=opt['device']))
         self.residual = None
         self.octree : OctreeNodeList = None
         
@@ -199,11 +210,12 @@ class HierarchicalACORN(nn.Module):
             self.octree.split_all_at_depth(i)
             self.octree.delete_depth_level(i)
 
-    def add_model(self, opt):
-        self.models.append(ACORN(int(2**(len(self.models)*0.5+6)), opt))
+    def add_model(self, error):
+        self.models.append(ACORN(int(2**(len(self.models)*0.5+3)), self.opt))
+        self.RMSE = torch.cat([self.RMSE, error])
 
     def forward(self, block, block_position, model_no):
-        block_output = self.models[model_no](block_position, block, self.errors[-1])
+        block_output = self.models[model_no](block_position, block, self.RMSE[model_no])
         return block_output
 
     def calculate_block_errors(self, error_func, item):
@@ -211,7 +223,7 @@ class HierarchicalACORN(nn.Module):
                 self.octree.max_depth())
         block_positions = torch.tensor(block_positions, 
                 device=self.opt['device'])
-        block_outputs = self.models[-1].forward_batch(block_positions, blocks, self.errors[-1])
+        block_outputs = self.models[-1].forward_batch(block_positions, blocks, self.RMSE[-1])
         for b in range(len(blocks)):
             if('2D' in self.opt['mode']):
                 block_outputs[b] += self.residual[:,:,
@@ -237,7 +249,7 @@ class HierarchicalACORN(nn.Module):
                 device=self.opt['device'])
         out = torch.zeros(self.octree.full_shape, dtype=torch.float32, device=self.opt['device'])
         out += self.residual
-        block_outputs = self.models[-1].forward_batch(block_positions, blocks, self.errors[-1])
+        block_outputs = self.models[-1].forward_batch(block_positions, blocks, self.RMSE[-1])
         for b in range(len(blocks)):
             if('2D' in self.opt['mode']):
                 out[:,:,
@@ -255,27 +267,29 @@ class HierarchicalACORN(nn.Module):
                         blocks[b].pos[2]+block_outputs[b].shape[4]] += block_outputs[b]
         return out
 
-    def get_full_img_no_residual(self, octree):
-        blocks, block_positions = octree.depth_to_blocks_and_block_positions(
-                octree.max_depth())
-        block_positions = torch.tensor(block_positions, 
-                device=self.opt['device'])
-        out = torch.zeros(octree.full_shape, dtype=torch.float32, device=self.opt['device'])
-        out += self.residual
-        block_outputs = self.models[-1].forward_batch(block_positions, blocks, self.errors[-1])
-        for b in range(len(blocks)):
-            if('2D' in self.opt['mode']):
-                out[:,:,
-                    blocks[b].pos[0]:\
-                        blocks[b].pos[0]+block_outputs[b].shape[2],
-                    blocks[b].pos[1]:\
-                        blocks[b].pos[1]+block_outputs[b].shape[3]] += block_outputs[b]
-            else:
-               out[:,:,
-                    blocks[b].pos[0]:\
-                        blocks[b].pos[0]+block_outputs[b].shape[2],
-                    blocks[b].pos[1]:\
-                        blocks[b].pos[1]+block_outputs[b].shape[3],                    
-                    blocks[b].pos[2]:\
-                        blocks[b].pos[2]+block_outputs[b].shape[4]] += block_outputs[b]
+    def get_full_img_no_residual(self):  
+        out = torch.zeros(self.octree.full_shape, dtype=torch.float32, device=self.opt['device'])
+        model_no = 0
+        for depth in range(self.opt['octree_depth_start'], self.opt['octree_depth_end']):
+            blocks, block_positions = self.octree.depth_to_blocks_and_block_positions(
+                depth)
+            block_positions = torch.tensor(block_positions, 
+                    device=self.opt['device'])
+            block_outputs = self.models[model_no].forward_batch(block_positions, blocks, self.RMSE[model_no])
+            for b in range(len(blocks)):
+                if('2D' in self.opt['mode']):
+                    out[:,:,
+                        blocks[b].pos[0]:\
+                            blocks[b].pos[0]+block_outputs[b].shape[2],
+                        blocks[b].pos[1]:\
+                            blocks[b].pos[1]+block_outputs[b].shape[3]] += block_outputs[b]
+                else:
+                    out[:,:,
+                        blocks[b].pos[0]:\
+                            blocks[b].pos[0]+block_outputs[b].shape[2],
+                        blocks[b].pos[1]:\
+                            blocks[b].pos[1]+block_outputs[b].shape[3],                    
+                        blocks[b].pos[2]:\
+                            blocks[b].pos[2]+block_outputs[b].shape[4]] += block_outputs[b]
+            model_no += 1
         return out

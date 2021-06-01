@@ -118,6 +118,17 @@ class OctreeNodeList:
                 i += 1
         return found
     
+    def get_octree_block_img(self, device="cpu"):
+        base = torch.ones(self.full_shape, dtype=torch.float32, device=device)
+        color_to_fill = torch.tensor([[0, 0, 0]], dtype=torch.float32, device=device).unsqueeze(2)
+        for k in self.depth_to_nodes.keys():
+            for block in self.depth_to_nodes[k]:
+                base[:,:,block.pos[0]:block.pos[0]+block.shape[2],block.pos[1]] = color_to_fill
+                base[:,:,block.pos[0],block.pos[1]:block.pos[1]+block.shape[3]] = color_to_fill
+                base[:,:,block.pos[0]:block.pos[0]+block.shape[2],block.pos[1]+block.shape[3]-1] = color_to_fill
+                base[:,:,block.pos[0]+block.shape[2]-1,block.pos[1]:block.pos[1]+block.shape[3]] = color_to_fill
+        return base
+
     def split_all_at_depth(self, d):
         for i in range(len(self.depth_to_nodes[d])):            
             split_nodes = self.depth_to_nodes[d][i].split()
@@ -165,6 +176,5 @@ class OctreeNodeList:
 
         torch.save(self, os.path.join(folder_to_save_in, "octree.data"))
     
-    def load(self, location):
-        self = torch.load(os.path.join(location, "octree.data"))
-        return self
+    def load(location):
+        return torch.load(os.path.join(location, "octree.data"))
