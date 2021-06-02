@@ -199,7 +199,7 @@ class HierarchicalACORN(nn.Module):
     def __init__(self, opt):
         super(HierarchicalACORN, self).__init__()        
         self.opt = opt
-        self.models = nn.ModuleList([ACORN(int(2**(7.1)), opt)])
+        self.models = nn.ModuleList([ACORN(int(2**(opt['FC_size_exp_start'])), opt)])
         self.register_buffer("RMSE", torch.tensor([1], dtype=torch.float32, device=opt['device']))
         self.residual = None
         self.octree : OctreeNodeList = None
@@ -211,7 +211,8 @@ class HierarchicalACORN(nn.Module):
             self.octree.delete_depth_level(i)
 
     def add_model(self, error):
-        self.models.append(ACORN(int(2**(len(self.models)*0.5+3)), self.opt))
+        self.models.append(ACORN(int(2**(len(self.models)*self.opt['FC_size_exp_grow']+self.opt['FC_size_exp_start'])), 
+            self.opt))
         self.RMSE = torch.cat([self.RMSE, error])
 
     def forward(self, block, block_position, model_no):
@@ -241,6 +242,13 @@ class HierarchicalACORN(nn.Module):
                         blocks[b].pos[2]+block_outputs[b].shape[4]]
             error = error_func(block_outputs[b], blocks[b].data(item))
             blocks[b].error = error.item()
+
+    def count_parameters(self): 
+        num = 0
+        for i in range(len(self.models)):
+            num_this_model = sum(p.numel() for p in self.models[i].parameters())
+            num += num_this_model
+        return num
 
     def get_full_img(self):
         blocks, block_positions = self.octree.depth_to_blocks_and_block_positions(

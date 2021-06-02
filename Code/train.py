@@ -176,6 +176,7 @@ class Trainer():
 
             if((not self.opt['train_distributed'] or rank == 0) and \
                 model_num < self.opt['octree_depth_end'] - self.opt['octree_depth_start']-1):
+                print("Total parameter count: %i" % model.count_parameters())   
                 print("Adding higher-resolution model")   
                 with torch.no_grad():                                    
                     model.residual = model.get_full_img().detach()
@@ -202,8 +203,9 @@ class Trainer():
                     param.requires_grad = False
                 self.opt['epoch'] = 0
                 torch.cuda.empty_cache()
-       
+        
         if(not self.opt['train_distributed'] or rank == 0):
+            print("Total parameter count: %i" % model.count_parameters())   
             end_time = time.time()
             total_time = end_time - start_time
             print("Time to train: %0.01f minutes" % (total_time/60))
@@ -227,6 +229,8 @@ if __name__ == '__main__':
     parser.add_argument('--feat_grid_y',default=None,type=int,help='Y resolution of feature grid')
     parser.add_argument('--feat_grid_z',default=None,type=int,help='Z resolution of feature grid (if 3D)')
     parser.add_argument('--num_positional_encoding_terms',default=None,type=int,help='Number of positional encoding terms')
+    parser.add_argument('--FC_size_exp_start',default=None,type=float,help='How large the FC layers start')
+    parser.add_argument('--FC_size_exp_grow',default=None,type=float,help='How much the FC layers grow deeper in the octree')
     
     parser.add_argument('--octree_depth_start',default=None,type=int,help='How deep to start the octree, inclusive')    
     parser.add_argument('--octree_depth_end',default=None,type=int,help='How deep to end the octree, exclusive')

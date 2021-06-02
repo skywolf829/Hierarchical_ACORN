@@ -18,6 +18,8 @@ class Options():
         opt['feat_grid_y']              = 32
         opt['feat_grid_z']              = 32
         opt['num_positional_encoding_terms'] = 6
+        opt['FC_size_exp_start']        = 3
+        opt['FC_size_exp_grow']        = 0.5
 
         opt["octree_depth_start"]      = 0
         opt["octree_depth_end"]        = 6
