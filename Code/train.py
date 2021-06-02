@@ -61,7 +61,7 @@ class Trainer():
         item = item.to(self.opt['device'])
 
         
-        target_PSNR = 40
+        target_PSNR = self.opt['error_bound']
         MSE_limit = 10 ** ((-1*target_PSNR + 20*log10(1.0))/10)
         
         model.init_octree(item.shape)
@@ -186,8 +186,10 @@ class Trainer():
                 print("Last error: " + str(block_error_sum.item()))
                 #model.errors.append(block_error_sum.item()**0.5)
 
-                #model.octree.split_from_error_max_depth(MSE_limit)
-                model.octree.split_all_at_depth(model.octree.max_depth())
+                if(self.opt['error_bound_split']):
+                    model.octree.split_from_error_max_depth(MSE_limit)
+                else:
+                    model.octree.split_all_at_depth(model.octree.max_depth())
 
                 model_optim = optim.Adam(model.models[-1].parameters(), lr=self.opt["lr"], 
                     betas=(self.opt["beta_1"],self.opt["beta_2"]))
@@ -227,7 +229,9 @@ if __name__ == '__main__':
     parser.add_argument('--num_positional_encoding_terms',default=None,type=int,help='Number of positional encoding terms')
     
     parser.add_argument('--octree_depth_start',default=None,type=int,help='How deep to start the octree, inclusive')    
-    parser.add_argument('--octree_depth_end',default=None,type=int,help='How deep to end the octree, inclusive')
+    parser.add_argument('--octree_depth_end',default=None,type=int,help='How deep to end the octree, exclusive')
+    parser.add_argument('--error_bound_split',default=None,type=str2bool,help='Whether to split based on error')
+    parser.add_argument('--error_bound',default=None,type=float,help='The target PSNR error')
 
     parser.add_argument('--train_distributed',type=str2bool,default=None, help='Use distributed training')
     parser.add_argument('--gpus_per_node',default=None, type=int,help='Whether or not to save discriminators')

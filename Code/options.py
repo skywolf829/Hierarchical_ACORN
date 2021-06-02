@@ -21,6 +21,8 @@ class Options():
 
         opt["octree_depth_start"]      = 0
         opt["octree_depth_end"]        = 6
+        opt['error_bound_split']       = True
+        opt['error_bound']             = 40
 
         opt["train_distributed"]       = False
         opt["gpus_per_node"]           = 8
