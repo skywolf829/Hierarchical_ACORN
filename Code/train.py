@@ -267,6 +267,7 @@ if __name__ == '__main__':
     if(not opt['train_distributed']):
         trainer.train(0, model, item)
     else:
-
+        #to be implemented
+        print("not implemented yet")
     print(prof.display())
     prof.disable()
