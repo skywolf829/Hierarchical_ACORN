@@ -132,7 +132,7 @@ class Trainer():
                         octree_blocks = model.octree.get_octree_block_img(self.opt['device'])            
                         psnr = PSNR(reconstructed, item, torch.tensor(1.0))
                         s = ssim(reconstructed, item)
-                        print("Iteration %i, MSE: %0.04f, PSNR (dB): %0.02f, SSIM: %0.02f" % \
+                        print("Iteration %i, MSE: %0.05f, PSNR (dB): %0.02f, SSIM: %0.03f" % \
                             (epoch, block_error_sum.item(), psnr.item(), s.item()))
                         #writer.add_scalar('MSE', block_error_sum.item(), step)
                         writer.add_scalar('PSNR_over_epochs', psnr.item(), step)
@@ -146,7 +146,7 @@ class Trainer():
                         writer.add_image("reconstruction_blocks", reconstructed[0].clamp_(0, 1)*octree_blocks[0], step)
 
                 elif(step % 5 == 0 and (not self.opt['train_distributed'] or rank == 0)):
-                    print("Iteration %i, MSE: %0.04f" % \
+                    print("Iteration %i, MSE: %0.05f" % \
                             (epoch, block_error_sum.item()))
                 step += 1
             
