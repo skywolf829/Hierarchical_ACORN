@@ -29,22 +29,10 @@ class OctreeNode:
     def split(self):
         nodes = []
         k = 0
-        for x_quad_start in range(0, self.shape[2], int(self.shape[2]/2)):
-            if(x_quad_start == 0):
-                x_size = int(self.shape[2]/2)
-            else:
-                x_size = self.shape[2] - int(self.shape[2]/2)
-            for y_quad_start in range(0, self.shape[3], int(self.shape[3]/2)):
-                if(y_quad_start == 0):
-                    y_size = int(self.shape[3]/2)
-                else:
-                    y_size = self.shape[3] - int(self.shape[3]/2)
+        for x_start, x_size in [(0, int(self.shape[2]/2)), (int(self.shape[2]/2), self.shape[2] - int(self.shape[2]/2))]:
+            for y_start, y_size in [(0, int(self.shape[3]/2)), (int(self.shape[3]/2), self.shape[3] - int(self.shape[3]/2))]:
                 if(len(self.shape) == 5):
-                    for z_quad_start in range(0, self.shape[4], int(self.shape[4]/2)):
-                        if(z_quad_start == 0):
-                            z_size = int(self.shape[4]/2)
-                        else:
-                            z_size = self.shape[4] - int(self.shape[4]/2)
+                    for z_start, z_size in [(0, int(self.shape[4]/2)), (int(self.shape[4]/2), self.shape[4] - int(self.shape[4]/2))]:
                         n_quad = OctreeNode(
                             self.node_list,
                             [
@@ -52,9 +40,9 @@ class OctreeNode:
                                 x_size, y_size, z_size
                             ],
                             [
-                                self.pos[0]+x_quad_start, 
-                                self.pos[1]+y_quad_start,
-                                self.pos[2]+z_quad_start
+                                self.pos[0]+x_start, 
+                                self.pos[1]+y_start,
+                                self.pos[2]+z_start
                             ],
                             self.depth+1,
                             self.index*(2**(len(self.shape)-2)) + k
@@ -69,8 +57,8 @@ class OctreeNode:
                             x_size, y_size
                         ],
                         [
-                            self.pos[0]+x_quad_start, 
-                            self.pos[1]+y_quad_start,
+                            self.pos[0]+x_start, 
+                            self.pos[1]+y_start,
                         ],
                         self.depth+1,
                         self.index*(2**(len(self.shape)-2)) + k
@@ -123,10 +111,17 @@ class OctreeNodeList:
         color_to_fill = torch.tensor([[0, 0, 0]], dtype=torch.float32, device=device).unsqueeze(2)
         for k in self.depth_to_nodes.keys():
             for block in self.depth_to_nodes[k]:
-                base[:,:,block.pos[0]:block.pos[0]+block.shape[2],block.pos[1]] = color_to_fill
-                base[:,:,block.pos[0],block.pos[1]:block.pos[1]+block.shape[3]] = color_to_fill
-                base[:,:,block.pos[0]:block.pos[0]+block.shape[2],block.pos[1]+block.shape[3]-1] = color_to_fill
-                base[:,:,block.pos[0]+block.shape[2]-1,block.pos[1]:block.pos[1]+block.shape[3]] = color_to_fill
+                base[:,:,block.pos[0]:block.pos[0]+block.shape[2],
+                    block.pos[1]] = color_to_fill
+
+                base[:,:,block.pos[0],
+                    block.pos[1]:block.pos[1]+block.shape[3]] = color_to_fill
+
+                base[:,:,block.pos[0]:block.pos[0]+block.shape[2],
+                    block.pos[1]+block.shape[3]-1] = color_to_fill
+
+                base[:,:,block.pos[0]+block.shape[2]-1,
+                    block.pos[1]:block.pos[1]+block.shape[3]] = color_to_fill
         return base
 
     def split_all_at_depth(self, d):

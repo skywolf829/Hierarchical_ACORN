@@ -17,6 +17,7 @@ import h5py
 from pytorch_memlab import LineProfiler, MemReporter, profile
 from torch.utils.checkpoint import checkpoint_sequential, checkpoint
 import imageio
+import cv2 as cv
 
 if __name__ == '__main__':
     
@@ -27,7 +28,7 @@ if __name__ == '__main__':
     output_folder = os.path.join(project_folder_path, "Output")
     save_folder = os.path.join(project_folder_path, "SavedModels")
     
-    load_from = "Snick_4levels_dynamic_error"
+    load_from = "pluto_dynamic"#"Snick_5levels_dynamic_error"
 
     opt = load_options(os.path.join(save_folder, load_from))
     opt["device"] = "cuda:0"
@@ -37,14 +38,27 @@ if __name__ == '__main__':
     item = torch.tensor(item).unsqueeze(0).to(opt['device'])
 
     model = load_model(opt, opt['device'])
+    with torch.no_grad():
+        reconstruction = model.get_full_img_no_residual()    
+        imageio.imwrite("recon.png", reconstruction.detach()[0].permute(1, 2, 0).cpu().numpy())
 
-    img = model.get_full_img_no_residual()
-    octree_blocks = model.octree.get_octree_block_img()
+        octree_blocks = model.octree.get_octree_block_img()
 
-    img *= octree_blocks.to(opt['device'])
+        img = reconstruction * octree_blocks.to(opt['device'])
 
-    print(img.shape)
+        print(img.shape)
 
-    img = img.detach()[0].permute(1, 2, 0).cpu().numpy()
-    imageio.imwrite("test.png", img)
+        img = img.detach()[0].permute(1, 2, 0).cpu().numpy()
+        imageio.imwrite("test.png", img)
 
+        
+        reconstruction = reconstruction.detach()[0].permute(1, 2, 0).cpu().numpy()
+        grad_x = cv.Sobel(reconstruction, cv.CV_16S, 1, 0, ksize=3, scale=1, delta=0, borderType=cv.BORDER_DEFAULT)
+        grad_y = cv.Sobel(reconstruction, cv.CV_16S, 0, 1, ksize=3, scale=1, delta=0, borderType=cv.BORDER_DEFAULT)
+        #dst = cv.Laplacian(reconstruction, 1, ksize=3)
+
+        print(grad_x.shape)
+        print(grad_y.shape)
+        imageio.imwrite("x_grad.png", grad_x)
+        imageio.imwrite("y_grad.png", grad_y)
+        imageio.imwrite("xy_grad.png", grad_x + grad_y)
