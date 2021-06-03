@@ -4,7 +4,7 @@
     "beta_1": 0.5,
     "beta_2": 0.999,
     "device": "cuda:0",
-    "epoch": 0,
+    "epoch": 1999,
     "epochs": 2000,
     "error_bound": 40,
     "error_bound_split": true,
