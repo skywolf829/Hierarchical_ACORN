@@ -1,10 +1,10 @@
 {
     "FC_size_exp_grow": 0.5,
-    "FC_size_exp_start": 3,
+    "FC_size_exp_start": 7.1,
     "beta_1": 0.5,
     "beta_2": 0.999,
     "device": "cuda:0",
-    "epoch": 0,
+    "epoch": 5000,
     "epochs": 10000,
     "error_bound": 40,
     "error_bound_split": false,
