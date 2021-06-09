@@ -1,9 +1,6 @@
 from torch.autograd.grad_mode import F
 from utility_functions import str2bool
 from options import *
-from datasets import LocalDataset, LocalTemporalDataset
-from models import GenericModel, load_model
-from train import TemporalTrainer, Trainer, save_model
 import argparse
 import os
 import h5py
@@ -41,11 +38,11 @@ if __name__ == '__main__':
     '''
 
     '''
-    a= imageio.imread("pluto.png")
+    a= imageio.imread("./TrainingData/pluto.png")
     print(a.shape)
     a = a.swapaxes(1,2).swapaxes(0,1)
     print(a.shape)
-    a = a.astype(np.float32)[:,::2,::2]
+    a = a.astype(np.float32)[:,:,:]
     a /= 255.0
     f = h5py.File("pluto.h5", 'w')
     f['data'] = a

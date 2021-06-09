@@ -1,5 +1,5 @@
 from math import log10
-from utility_functions import PSNR, str2bool, ssim
+from utility_functions import PSNR, bilinear_interpolate, str2bool, ssim
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
@@ -28,7 +28,7 @@ if __name__ == '__main__':
     output_folder = os.path.join(project_folder_path, "Output")
     save_folder = os.path.join(project_folder_path, "SavedModels")
     
-    load_from = "pluto_dynamic"#"Snick_5levels_dynamic_error"
+    load_from = "Cat_ACORN_fixed"#"Snick_5levels_dynamic_error"
 
     opt = load_options(os.path.join(save_folder, load_from))
     opt["device"] = "cuda:0"
@@ -62,3 +62,6 @@ if __name__ == '__main__':
         imageio.imwrite("x_grad.png", grad_x)
         imageio.imwrite("y_grad.png", grad_y)
         imageio.imwrite("xy_grad.png", grad_x + grad_y)
+    
+    
+    

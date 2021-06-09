@@ -88,29 +88,27 @@ class OctreeNodeList:
         root = OctreeNode(self, 
             full_shape, [0, 0] if len(full_shape) == 4 else [0, 0, 0], 0, 0)
 
-        self.depth_to_nodes : dict[int, List] = {0: [root]}
+        self.depth_to_nodes : dict[int, List] = {0: { 0: root } }
 
     def append(self, n : OctreeNode):
         if(n.depth not in self.depth_to_nodes):
-            self.depth_to_nodes[n.depth] = []
-        self.depth_to_nodes[n.depth].append(n)        
+            self.depth_to_nodes[n.depth] = {}
+        self.depth_to_nodes[n.depth][n.index] = n        
 
     def remove(self, n : OctreeNode) -> bool:
         found : bool = False
         if(n.depth in self.depth_to_nodes):
             i : int = 0
-            while(i < len(self.depth_to_nodes[n.depth]) and not found):
-                if(self.depth_to_nodes[n.depth][i] is n):
-                    self.depth_to_nodes[n.depth].pop(i)
-                    found = True
-                i += 1
+            if(n.index in self.depth_to_nodes[n.depth]):
+                del self.depth_to_nodes[n.depth][n.index]
+                found = True
         return found
-    
+   
     def get_octree_block_img(self, device="cpu"):
         base = torch.ones(self.full_shape, dtype=torch.float32, device=device)
         color_to_fill = torch.tensor([[0, 0, 0]], dtype=torch.float32, device=device).unsqueeze(2)
         for k in self.depth_to_nodes.keys():
-            for block in self.depth_to_nodes[k]:
+            for block in self.depth_to_nodes[k].values():
                 base[:,:,block.pos[0]:block.pos[0]+block.shape[2],
                     block.pos[1]] = color_to_fill
 
@@ -125,22 +123,27 @@ class OctreeNodeList:
         return base
 
     def split_all_at_depth(self, d):
-        for i in range(len(self.depth_to_nodes[d])):            
-            split_nodes = self.depth_to_nodes[d][i].split()
+        for block in self.depth_to_nodes[d].values():            
+            split_nodes = block.split()
             for j in range(len(split_nodes)):
                 self.append(split_nodes[j])
 
-    def split_from_error_max_depth(self, max_error):
+    def split_from_error_max_depth(self, item, reconstruction, error_func, max_error):
         max_depth = self.max_depth()
-        
+        '''
         for i in range(len(self.depth_to_nodes[max_depth])):
             if self.depth_to_nodes[max_depth][i].error > max_error:
                 split_nodes = self.depth_to_nodes[max_depth][i].split()
                 for j in range(len(split_nodes)):
                     self.append(split_nodes[j])
+        '''
+        for block in self.depth_to_nodes[max_depth].values():
+            split_nodes = block.split()
+            for b in split_nodes:
+                if error_func(b.data(reconstruction), b.data(item)) > max_error:
+                    self.append(b)
 
-    def depth_to_blocks_and_block_positions(self, depth_level, rank=0, num_splits=1):
-        blocks = self.depth_to_nodes[depth_level]
+    def blocks_to_positions(self, blocks):
         block_positions = []
         for i in range(len(blocks)):
             p = []
@@ -148,11 +151,16 @@ class OctreeNodeList:
                 p_i = blocks[i].pos[j] / self.full_shape[2+j]
                 p_i = p_i - 0.5
                 p_i = p_i * 2
-                p_i = p_i + (1/2**depth_level)
+                p_i = p_i + (1/2**blocks[i].depth)
                 p.append(p_i)
             block_positions.append(p)
+        return block_positions
+
+    def depth_to_blocks_and_block_positions(self, depth_level, rank=0, num_splits=1):
+        blocks = list(self.depth_to_nodes[depth_level].values())[rank::num_splits]
+        block_positions = self.blocks_to_positions(blocks)
         
-        return blocks[rank::num_splits], block_positions[rank::num_splits]
+        return blocks, block_positions
 
     def delete_depth_level(self, depth_level):
         del self.depth_to_nodes[depth_level]

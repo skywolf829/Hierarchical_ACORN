@@ -17,6 +17,8 @@ class Options():
         opt['feat_grid_x']              = 32
         opt['feat_grid_y']              = 32
         opt['feat_grid_z']              = 32
+        opt['local_queries_per_block']  = 50
+        opt['max_blocks_per_iter']      = 100
         opt['num_positional_encoding_terms'] = 6
         opt['FC_size_exp_start']        = 3
         opt['FC_size_exp_grow']        = 0.5
@@ -39,6 +41,7 @@ class Options():
         # Info during training (to continue if it stopped)
         opt["epoch"]                   = 0
         opt["save_every"]              = 1000
+        opt["log_every"]               = 1000
 
         return opt
 

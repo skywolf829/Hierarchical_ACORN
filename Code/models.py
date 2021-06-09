@@ -159,19 +159,19 @@ class ACORN(nn.Module):
         )
         
         self.feature_decoder = nn.Sequential(
-            VolumeToFC(opt),
             nn.Linear(opt['feat_grid_channels'], 64),
             nn.ReLU(),
-            nn.Linear(64, opt['num_channels']),
-            FCToVolume(opt)
+            nn.Linear(64, opt['num_channels'])
         )
 
+        self.vol2FC = VolumeToFC(opt)
+        self.FC2vol = FCToVolume(opt)
         self.apply(weights_init)
     
     def forward(self, global_coordinates, block_shape, mult = 1.0):
         # Todo
         return global_coordinates
-        
+
     def forward_batch(self, global_coordinates, blocks, mult = 1.0):
         global_coordinates = self.positional_encoder(global_coordinates)
         # global coordinates will be B x n_dims
@@ -188,8 +188,21 @@ class ACORN(nn.Module):
             b_vals = F.interpolate(vals[i:i+1], size=blocks[i].shape[2:], 
                 mode='bilinear' if "2D" in self.opt['mode'] else "trilinear", 
                 align_corners=False)
+            b_vals = self.vol2FC(b_vals)
+            b_val_shape = list(b_vals.shape)
+            b_vals = b_vals.flatten(0, -2)
+            batch_vals = []
+            batch_start = 0
+            while(batch_start < b_vals.shape[0]):
+                batch_size = min(self.opt['local_queries_per_block']*self.opt['local_queries_per_block']*self.opt['max_blocks_per_iter'], 
+                    b_vals.shape[0]-batch_start)
+                batch_vals.append(self.feature_decoder(b_vals[batch_start:batch_start+batch_size]))
+                batch_start += batch_size
 
-            b_vals = self.feature_decoder(b_vals)
+            b_vals = torch.cat(batch_vals)
+            b_val_shape[-1] = b_vals.shape[-1]
+            b_vals = b_vals.reshape(b_val_shape)
+            b_vals = self.FC2vol(b_vals)
 
             all_block_vals.append(b_vals * mult)
         
@@ -203,6 +216,7 @@ class HierarchicalACORN(nn.Module):
         self.register_buffer("RMSE", torch.tensor([1], dtype=torch.float32, device=opt['device']))
         self.residual = None
         self.octree : OctreeNodeList = None
+        self.pe = PositionalEncoding(opt)
         
     def init_octree(self, data_shape):
         self.octree = OctreeNodeList(data_shape)
@@ -215,9 +229,52 @@ class HierarchicalACORN(nn.Module):
             self.opt))
         self.RMSE = torch.cat([self.RMSE, error])
 
-    def forward(self, block, block_position, model_no):
-        block_output = self.models[model_no](block_position, block, self.RMSE[model_no])
-        return block_output
+    def forward(self, blocks, block_positions, local_positions, depth=None, out=None):
+        if(depth is None):
+            depth = self.octree.max_depth()
+        model_no = depth - self.opt['octree_depth_start']
+        
+        print("model_no " + str(model_no))
+        encoded_positions = self.pe(block_positions)
+        feat_grids = self.models[model_no].feature_encoder(encoded_positions)
+        print("feat_grids 1 shape: " + str(feat_grids.shape))
+        self.models[model_no].feat_grid_shape[0] = feat_grids.shape[0]
+        feat_grids = feat_grids.reshape(self.models[model_no].feat_grid_shape)
+        print("feat_grids 2 shape: " + str(feat_grids.shape))
+        feats = F.grid_sample(feat_grids, local_positions, mode="bilinear", align_corners=False)
+        feats = self.models[model_no].vol2FC(feats)
+        print("feat_grids 3 shape: " + str(feat_grids.shape))
+        if(out is None):
+            out = self.models[model_no].FC2vol(self.models[model_no].feature_decoder(feats))
+        else:
+            out += self.models[model_no].FC2vol(self.models[model_no].feature_decoder(feats))
+        
+        print("out shape: " + str(out.shape))
+
+        if(model_no > 0):
+            parent_blocks = []
+            for block in blocks:
+                parent_blocks.append(self.octree.depth_to_nodes[depth-1][int(block.index / 4 if '2D' in self.opt['mode'] else 8)])
+            parent_block_positions = torch.tensor(self.octree.blocks_to_positions(parent_blocks), device=self.opt['device'])
+            
+            print("parent_block_positions shape: " + str(parent_block_positions.shape))
+            parent_block_local_positions = local_positions.clone()
+            parent_block_local_positions *= 0.5
+            print("parent_block_local_positions shape: " + str(parent_block_local_positions.shape))
+
+            for i in range(len(blocks)):
+                quad = blocks[i].index % 4 if '2D' in self.opt['mode'] else 8
+                if('2D' in self.opt['mode']):
+                    parent_block_local_positions[i,...,0] += ((quad % 2) - 0.5)                        
+                    parent_block_local_positions[i,...,1] += (int(quad / 2) - 0.5)
+                else:               
+                    parent_block_local_positions[i,...,0] += (int(quad / 4) - 0.5)
+                    parent_block_local_positions[i,...,1] += (int((quad % 4) / 2) - 0.5)                        
+                    parent_block_local_positions[i,...,2] += (quad % 2 - 0.5)  
+            out = self.forward(parent_blocks, parent_block_positions, parent_block_local_positions, depth - 1, out)               
+        
+
+        return out
 
     def calculate_block_errors(self, error_func, item):
         blocks, block_positions = self.octree.depth_to_blocks_and_block_positions(
@@ -266,7 +323,7 @@ class HierarchicalACORN(nn.Module):
                     blocks[b].pos[1]:\
                         blocks[b].pos[1]+block_outputs[b].shape[3]] += block_outputs[b]
             else:
-               out[:,:,
+                out[:,:,
                     blocks[b].pos[0]:\
                         blocks[b].pos[0]+block_outputs[b].shape[2],
                     blocks[b].pos[1]:\
