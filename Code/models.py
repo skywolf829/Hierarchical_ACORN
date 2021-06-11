@@ -13,6 +13,7 @@ from einops.layers.torch import Rearrange
 from math import pi
 from pytorch_memlab import LineProfiler, MemReporter, profile, profile_every
 from torch.utils.checkpoint import checkpoint_sequential, checkpoint
+import time
 
 file_folder_path = os.path.dirname(os.path.abspath(__file__))
 project_folder_path = os.path.join(file_folder_path, "..")
@@ -134,14 +135,14 @@ class ACORN(nn.Module):
         self.opt = opt
 
         self.n_dims = 2 if "2D" in opt['mode'] else 3
-        self.last_layer_output = opt['feat_grid_channels']*opt['feat_grid_x']*opt['feat_grid_y']
+        self.last_layer_output = opt['feat_grid_channels']*opt['feat_grid_y']*opt['feat_grid_x']
         if "3D" in opt['mode']:
             self.last_layer_output *= opt['feat_grid_z']
         
         self.feat_grid_shape = [1, self.opt['feat_grid_channels'], 
-            self.opt['feat_grid_x'], self.opt['feat_grid_y']]        
+            self.opt['feat_grid_y'], self.opt['feat_grid_x']]        
         if "3D" in self.opt['mode']:
-            self.feat_grid_shape.append(self.opt['feat_grid_z'])
+            self.feat_grid_shape.insert(2, self.opt['feat_grid_z'])
 
         self.positional_encoder = PositionalEncoding(opt)
 
@@ -229,76 +230,176 @@ class HierarchicalACORN(nn.Module):
             self.opt))
         self.RMSE = torch.cat([self.RMSE, error])
 
-    def forward(self, blocks, block_positions, local_positions, depth=None, out=None):
+    def forward(self, blocks, block_positions, local_positions, depth=None, parent_mapping=None, out=None):
         if(depth is None):
             depth = self.octree.max_depth()
         model_no = depth - self.opt['octree_depth_start']
-        
         print("model_no " + str(model_no))
+        print("Global block positions: " + str(block_positions))
         encoded_positions = self.pe(block_positions)
         feat_grids = self.models[model_no].feature_encoder(encoded_positions)
+
         print("feat_grids 1 shape: " + str(feat_grids.shape))
         self.models[model_no].feat_grid_shape[0] = feat_grids.shape[0]
         feat_grids = feat_grids.reshape(self.models[model_no].feat_grid_shape)
         print("feat_grids 2 shape: " + str(feat_grids.shape))
-        feats = F.grid_sample(feat_grids, local_positions, mode="bilinear", align_corners=False)
-        feats = self.models[model_no].vol2FC(feats)
-        print("feat_grids 3 shape: " + str(feat_grids.shape))
-        if(out is None):
-            out = self.models[model_no].FC2vol(self.models[model_no].feature_decoder(feats))
+
+        # If the local positions are a list, that means each block has an unequal
+        #   number of query locations and it can't be batched.
+        if(isinstance(local_positions, list)):
+            feats = []
+            for i in range(len(blocks)):
+                print("local_positions[i]: "+str(local_positions[i].shape))
+                feat = F.grid_sample(feat_grids[i:i+1], local_positions[i], mode='bilinear', align_corners=False)
+                feat = self.models[model_no].vol2FC(feat)
+                # Guaranteed that we will already have an "out" variable populated
+                for child_ind in parent_mapping[blocks[i].index]:
+                    out[child_ind:child_ind+1] += self.models[model_no].FC2vol(
+                        self.models[model_no].feature_decoder(
+                            feat[:,:,parent_mapping[blocks[i].index][child_ind][0]:parent_mapping[blocks[i].index][child_ind][1],:]
+                            )
+                        )
         else:
-            out += self.models[model_no].FC2vol(self.models[model_no].feature_decoder(feats))
+            # Batch computation of the local queries            
+            if(out is None):
+                print("local_positions: "+str(local_positions.shape))
+                feats = F.grid_sample(feat_grids, local_positions, mode="bilinear", align_corners=False)
+                feats = self.models[model_no].vol2FC(feats)            
+                out = self.models[model_no].FC2vol(self.models[model_no].feature_decoder(feats))
+            else:
+                print(parent_mapping)
+                for i in range(len(blocks)):
+                    print("local_positions[i:i+1]: "+str(local_positions[i:i+1].shape))
+                    feat = F.grid_sample(feat_grids[i:i+1], local_positions[i:i+1], mode='bilinear', align_corners=False)
+                    feat = self.models[model_no].vol2FC(feat)
+                    print("feat shape: " + str(feat.shape))
+                    # Guaranteed that we will already have an "out" variable populated
+                    for child_ind in parent_mapping[blocks[i].index].keys():
+                        out2 = self.models[model_no].FC2vol(
+                            self.models[model_no].feature_decoder(
+                                feat[:,:,parent_mapping[blocks[i].index][child_ind][0]:parent_mapping[blocks[i].index][child_ind][1],:]
+                                )
+                            )   
+                        print("out2 shape: " + str(out2.shape))
+                        out[child_ind:child_ind+1] += out2
         
         print("out shape: " + str(out.shape))
 
         if(model_no > 0):
-            parent_blocks = []
-            for block in blocks:
-                parent_blocks.append(self.octree.depth_to_nodes[depth-1][int(block.index / 4 if '2D' in self.opt['mode'] else 8)])
-            parent_block_positions = torch.tensor(self.octree.blocks_to_positions(parent_blocks), device=self.opt['device'])
+            # Parent block and parent block local positions, index -> block and index -> tensor of local positions
+            parent_blocks = {}                
+            parent_block_local_positions = {}
+
+            # Mapping so that parent block queries can be added the the correct block
+            #   maps parent_ind -> out_ind -> output_points[start:end]
+            if(parent_mapping is None):
+                parent_mapping = {}
             
-            print("parent_block_positions shape: " + str(parent_block_positions.shape))
-            parent_block_local_positions = local_positions.clone()
-            parent_block_local_positions *= 0.5
-            print("parent_block_local_positions shape: " + str(parent_block_local_positions.shape))
 
             for i in range(len(blocks)):
-                quad = blocks[i].index % 4 if '2D' in self.opt['mode'] else 8
+                # Get quadrand/octant and the parent index for the current block
+                magic_num = 4 if '2D' in self.opt['mode'] else 8
+                nodes_above = sum([magic_num**k for k in range(0, blocks[i].depth)])
+                quad = (blocks[i].index - nodes_above) % magic_num
+                parent_index = int((blocks[i].index - nodes_above) / magic_num) + sum([magic_num**k for k in range(0, blocks[i].depth-1)])
+                
+                #print("block ind: " + str(blocks[i].index))
+                #print("block depth: " + str(blocks[i].depth))
+                #print("quad: " + str(quad))
+                #print("parent_index: " + str(parent_index))
+                # Add parent index to parent blocks if necessary
+                if(parent_index not in parent_blocks):
+                    parent_blocks[parent_index] = self.octree.depth_to_nodes[depth-1][parent_index]
+
+                # Copy the locations for this block and shift it to the correct local position for
+                #   the parent
+                parent_block_local_position = local_positions[i:i+1].clone() * 0.5
+                print("parent_block_local_position shape: " + str(parent_block_local_position.shape))
                 if('2D' in self.opt['mode']):
-                    parent_block_local_positions[i,...,0] += ((quad % 2) - 0.5)                        
-                    parent_block_local_positions[i,...,1] += (int(quad / 2) - 0.5)
+                    parent_block_local_position[...,1] += ((quad % 2) - 0.5)                        
+                    parent_block_local_position[...,0] += (int(quad / 2) - 0.5)
                 else:               
-                    parent_block_local_positions[i,...,0] += (int(quad / 4) - 0.5)
-                    parent_block_local_positions[i,...,1] += (int((quad % 4) / 2) - 0.5)                        
-                    parent_block_local_positions[i,...,2] += (quad % 2 - 0.5)  
-            out = self.forward(parent_blocks, parent_block_positions, parent_block_local_positions, depth - 1, out)               
-        
+                    parent_block_local_position[...,0] += (int(quad / 4) - 0.5)
+                    parent_block_local_position[...,1] += (int((quad % 4) / 2) - 0.5)                        
+                    parent_block_local_position[...,2] += (quad % 2 - 0.5)  
+
+                # Add the local positions to the local position dict by directly adding it,
+                #   or concatenating it with the local positions that already exist to query
+
+                if(parent_index in parent_block_local_positions.keys()):
+                    
+                    if(blocks[i].index in parent_mapping.keys()):
+                        start = parent_block_local_positions[parent_index].shape[2]
+
+                        parent_block_local_positions[parent_index] = \
+                            torch.cat([parent_block_local_positions[parent_index], parent_block_local_position], 2)
+                            
+                        for out_ind in parent_mapping[blocks[i].index]:
+                            offset = parent_mapping[blocks[i].index][out_ind]
+                            parent_mapping[parent_index][out_ind] = [start + offset[0],
+                                start + offset[1]]
+                    else:
+                        parent_mapping[parent_index][blocks[i].index] = [parent_block_local_positions[parent_index].shape[2], 
+                            parent_block_local_positions[parent_index].shape[2] + parent_block_local_position.shape[2]]
+                        parent_block_local_positions[parent_index] = \
+                            torch.cat([parent_block_local_positions[parent_index], parent_block_local_position], 2)
+                else:
+                    if(blocks[i].index in parent_mapping.keys()):
+                        parent_block_local_positions[parent_index] = parent_block_local_position
+                        
+                        parent_mapping[parent_index] = {}
+                        start = 0
+                        for out_ind in parent_mapping[blocks[i].index]:
+                            offset = parent_mapping[blocks[i].index][out_ind]
+                            parent_mapping[parent_index][out_ind] = [start, start + offset[1]-offset[0]]
+                            start += offset[1]-offset[0]
+                    else:
+                        parent_block_local_positions[parent_index] = parent_block_local_position
+                        parent_mapping[parent_index] = {}
+                        parent_mapping[parent_index][blocks[i].index] = [0, parent_block_local_position.shape[2]]
+            
+
+            
+            # Keep track of if all blocks have the same # local queries for efficiency down the road
+            same_shape = True
+            s = None
+            
+            parent_block_local_positions = list(parent_block_local_positions.values())
+            for l_p in parent_block_local_positions:
+                # Update the shape if it is not set
+                if(s is None):
+                    s = list(l_p.shape)
+                # Check if they are the same shape
+                same_shape = same_shape and s == list(l_p.shape)
+            
+            # If they are the same shape (i.e. 10000 queries per parent block), we can 
+            #   combine them into a single tensor for batch computation. Otherwise,
+            #   we have to iterate over each block for values.
+            if(same_shape):
+                parent_block_local_positions = torch.cat(parent_block_local_positions, 0)
+                print("All blocks had same # query points")
+                print("parent_block_local_positions shape" + str(parent_block_local_positions.shape))
+            else:
+                print("Some blocks were unequal with query points")
+
+            # Update values for the next depth level of the ACORN hierarchy.
+            parent_blocks = list(parent_blocks.values())
+            parent_block_positions = torch.tensor(self.octree.blocks_to_positions(parent_blocks), device=self.opt['device'])                
+            print("parent_block_positions shape: " + str(parent_block_positions.shape))               
+            
+            out = self.forward(parent_blocks, parent_block_positions, parent_block_local_positions, depth-1, parent_mapping, out)    
 
         return out
 
-    def calculate_block_errors(self, error_func, item):
+    def calculate_block_errors(self, reconstructed, item, error_func):
         blocks, block_positions = self.octree.depth_to_blocks_and_block_positions(
                 self.octree.max_depth())
         block_positions = torch.tensor(block_positions, 
                 device=self.opt['device'])
-        block_outputs = self.models[-1].forward_batch(block_positions, blocks, self.RMSE[-1])
-        for b in range(len(blocks)):
-            if('2D' in self.opt['mode']):
-                block_outputs[b] += self.residual[:,:,
-                    blocks[b].pos[0]:\
-                        blocks[b].pos[0]+block_outputs[b].shape[2],
-                    blocks[b].pos[1]:\
-                        blocks[b].pos[1]+block_outputs[b].shape[3]]
-            else:
-               block_outputs[b] +=  self.residual[:,:,
-                    blocks[b].pos[0]:\
-                        blocks[b].pos[0]+block_outputs[b].shape[2],
-                    blocks[b].pos[1]:\
-                        blocks[b].pos[1]+block_outputs[b].shape[3],                    
-                    blocks[b].pos[2]:\
-                        blocks[b].pos[2]+block_outputs[b].shape[4]]
-            error = error_func(block_outputs[b], blocks[b].data(item))
-            blocks[b].error = error.item()
+        for block in blocks:
+            error = error_func(block.data(reconstructed), block.data(item))
+            block.error = error.item()
+            print("Block error: " + str(block.error))
 
     def count_parameters(self): 
         num = 0
@@ -332,10 +433,75 @@ class HierarchicalACORN(nn.Module):
                         blocks[b].pos[2]+block_outputs[b].shape[4]] += block_outputs[b]
         return out
 
+    def block_index_to_global_indices_mapping(self, global_positions):
+        print(global_positions.shape)
+        index_to_global_positions_indices = {}
+        for depth in range(self.octree.min_depth(), self.octree.max_depth()+1):
+            for block in self.octree.depth_to_nodes[depth].values():
+                block_bbox = self.octree.index_to_bounding_box(block.index, block.depth)
+                mask = global_positions[0,0,...,0] >= block_bbox[0]
+                mask = torch.logical_and(mask,global_positions[0,0,...,0] < block_bbox[1])
+                for i in range(1, global_positions.shape[-1]):                    
+                    mask = torch.logical_and(mask,global_positions[0,0,...,i] >= block_bbox[i*2])
+                    mask = torch.logical_and(mask,global_positions[0,0,...,i] <  block_bbox[i*2+1])
+                index_to_global_positions_indices[block.index] = mask
+
+        return index_to_global_positions_indices
+    
+    def forward_global_positions(self, global_positions, index_to_global_positions_indices=None, depth_start=None, depth_end=None):
+        if depth_start is None:
+            depth_start = self.opt['octree_depth_start']
+        if depth_end is None:
+            depth_end = self.octree.max_depth()+1
+            
+        pre_global_index_mapping = time.time()
+        if(index_to_global_positions_indices is None):
+            index_to_global_positions_indices = self.block_index_to_global_indices_mapping(global_positions)
+        #print("Global index mapping time %f" % (time.time()-pre_global_index_mapping))
+
+        if('2D' in self.opt['mode']):
+            out_shape = [global_positions.shape[0], self.opt['num_channels'], 1, global_positions.shape[-2]]
+        else:            
+            out_shape = [global_positions.shape[0], self.opt['num_channels'], 1, 1, global_positions.shape[-2]]
+        
+        out = torch.zeros(out_shape, device=self.opt['device'])
+
+        global_to_local_time = 0
+
+        start_time = time.time()
+        for depth in range(depth_start, depth_end):
+            model_start_time = time.time()
+            model_no = depth - self.opt['octree_depth_start']
+
+            blocks, block_positions = self.octree.depth_to_blocks_and_block_positions(depth)
+
+            block_positions = torch.tensor(block_positions, 
+                    device=self.opt['device'])
+
+            encoded_positions = self.pe(block_positions)
+            feat_grids = self.models[model_no].feature_encoder(encoded_positions)
+            self.models[model_no].feat_grid_shape[0] = feat_grids.shape[0]
+            feat_grids = feat_grids.reshape(self.models[model_no].feat_grid_shape)
+            for i in range(len(blocks)):
+                global_positions_within_block = global_positions[...,index_to_global_positions_indices[blocks[i].index],:]
+                t = time.time()
+                local_positions = self.octree.global_to_local(global_positions_within_block, blocks[i].index, blocks[i].depth)
+                global_to_local_time += time.time() - t
+                if(local_positions.shape[-2] > 0):
+                    feat = F.grid_sample(feat_grids[i:i+1], local_positions, mode='bilinear', align_corners=False)
+                    feat = self.models[model_no].vol2FC(feat)
+                    out_temp = self.models[model_no].FC2vol(self.models[model_no].feature_decoder(feat))
+                    out[...,index_to_global_positions_indices[blocks[i].index]] += out_temp
+            #print("Model at depth %i took %f seconds" % (depth, time.time()-model_start_time))
+        
+        #print("Feedforward for %i points took %f seconds" % (global_positions.shape[-2], time.time()-start_time))
+        #print("Time of that feedforward on global_to_local %f" % (global_to_local_time))
+        return out
+                
     def get_full_img_no_residual(self):  
         out = torch.zeros(self.octree.full_shape, dtype=torch.float32, device=self.opt['device'])
         model_no = 0
-        for depth in range(self.opt['octree_depth_start'], self.opt['octree_depth_end']):
+        for depth in range(self.octree.max_depth(), self.octree.max_depth()+1):
             blocks, block_positions = self.octree.depth_to_blocks_and_block_positions(
                 depth)
             block_positions = torch.tensor(block_positions, 

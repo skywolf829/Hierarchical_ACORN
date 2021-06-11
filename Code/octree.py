@@ -20,6 +20,8 @@ class OctreeNode:
         self.depth : int = depth
         self.index : int = index
         self.last_loss : float = 0
+        self.parent = None
+        self.children = []
 
     def __str__(self) -> str:
         return "{ data_shape: " + str(self.shape) + ", " + \
@@ -28,24 +30,26 @@ class OctreeNode:
 
     def split(self):
         nodes = []
+        nodes_above = sum([(2**(len(self.shape)-2))**i for i in range(0, self.depth+1)])
+        nodes_here = sum([(2**(len(self.shape)-2))**i for i in range(0, self.depth)])
         k = 0
-        for x_start, x_size in [(0, int(self.shape[2]/2)), (int(self.shape[2]/2), self.shape[2] - int(self.shape[2]/2))]:
-            for y_start, y_size in [(0, int(self.shape[3]/2)), (int(self.shape[3]/2), self.shape[3] - int(self.shape[3]/2))]:
+        for dim_1_start, dim_1_size in [(0, int(self.shape[2]/2)), (int(self.shape[2]/2), self.shape[2] - int(self.shape[2]/2))]:
+            for dim_2_start, dim_2_size in [(0, int(self.shape[3]/2)), (int(self.shape[3]/2), self.shape[3] - int(self.shape[3]/2))]:
                 if(len(self.shape) == 5):
-                    for z_start, z_size in [(0, int(self.shape[4]/2)), (int(self.shape[4]/2), self.shape[4] - int(self.shape[4]/2))]:
+                    for dim_3_start, dim_3_size in [(0, int(self.shape[4]/2)), (int(self.shape[4]/2), self.shape[4] - int(self.shape[4]/2))]:
                         n_quad = OctreeNode(
                             self.node_list,
                             [
                                 self.shape[0], self.shape[1], 
-                                x_size, y_size, z_size
+                                dim_1_size, dim_2_size, dim_3_size
                             ],
                             [
-                                self.pos[0]+x_start, 
-                                self.pos[1]+y_start,
-                                self.pos[2]+z_start
+                                self.pos[0]+dim_1_start, 
+                                self.pos[1]+dim_2_start,
+                                self.pos[2]+dim_3_start
                             ],
                             self.depth+1,
-                            self.index*(2**(len(self.shape)-2)) + k
+                            nodes_above + (self.index-nodes_here)*(2**(len(self.shape)-2)) + k
                         )
                         nodes.append(n_quad)
                         k += 1     
@@ -54,14 +58,14 @@ class OctreeNode:
                         self.node_list,
                         [
                             self.shape[0], self.shape[1], 
-                            x_size, y_size
+                            dim_1_size, dim_2_size
                         ],
                         [
-                            self.pos[0]+x_start, 
-                            self.pos[1]+y_start,
+                            self.pos[0]+dim_1_start, 
+                            self.pos[1]+dim_2_start,
                         ],
                         self.depth+1,
-                        self.index*(2**(len(self.shape)-2)) + k
+                        nodes_above + (self.index-nodes_here)*(2**(len(self.shape)-2)) + k
                     )
                     nodes.append(n_quad)
                     k += 1       
@@ -126,9 +130,11 @@ class OctreeNodeList:
         for block in self.depth_to_nodes[d].values():            
             split_nodes = block.split()
             for j in range(len(split_nodes)):
+                split_nodes[j].parent = block
+                block.children.append(split_nodes[j])
                 self.append(split_nodes[j])
 
-    def split_from_error_max_depth(self, item, reconstruction, error_func, max_error):
+    def split_from_error_max_depth(self, reconstructed, item, error_func, max_error):
         max_depth = self.max_depth()
         '''
         for i in range(len(self.depth_to_nodes[max_depth])):
@@ -140,7 +146,9 @@ class OctreeNodeList:
         for block in self.depth_to_nodes[max_depth].values():
             split_nodes = block.split()
             for b in split_nodes:
-                if error_func(b.data(reconstruction), b.data(item)) > max_error:
+                if error_func(b.data(reconstructed), b.data(item)) > max_error:
+                    b.parent = block
+                    block.children.append(b)
                     self.append(b)
 
     def blocks_to_positions(self, blocks):
@@ -151,7 +159,7 @@ class OctreeNodeList:
                 p_i = blocks[i].pos[j] / self.full_shape[2+j]
                 p_i = p_i - 0.5
                 p_i = p_i * 2
-                p_i = p_i + (1/2**blocks[i].depth)
+                p_i = p_i + (1/(2**blocks[i].depth))
                 p.append(p_i)
             block_positions.append(p)
         return block_positions
@@ -161,6 +169,32 @@ class OctreeNodeList:
         block_positions = self.blocks_to_positions(blocks)
         
         return blocks, block_positions
+
+    def index_to_bounding_box(self, index, depth):
+        bounding_box = []
+        box_pos = self.depth_to_nodes[depth][index].pos
+        box_shape = list(self.depth_to_nodes[depth][index].shape[2:])
+        for i in range(len(box_pos)):
+            dim_start = box_pos[i]
+            dim_end = box_pos[i] + box_shape[i]
+            dim_start *= (2/self.full_shape[2+i])
+            dim_end *= (2/self.full_shape[2+i])
+            dim_start -= 1
+            dim_end -= 1
+            bounding_box.append(dim_start)
+            bounding_box.append(dim_end)
+            
+        return bounding_box
+
+    def global_to_local(self, global_coords, index, depth):
+        local_coords = global_coords.clone()
+        bounding_box = self.index_to_bounding_box(index, depth)
+        for i in range(0, len(bounding_box), 2):
+            dim_width = bounding_box[i+1] - bounding_box[i]
+            local_coords[...,int(i/2)] -= bounding_box[i]
+            local_coords[...,int(i/2)] *= (2/dim_width)
+            local_coords[...,int(i/2)] -= 1
+        return local_coords
 
     def delete_depth_level(self, depth_level):
         del self.depth_to_nodes[depth_level]

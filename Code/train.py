@@ -1,7 +1,7 @@
 from math import log10
 
 from numpy.core.shape_base import block
-from utility_functions import PSNR, str2bool, ssim, PSNRfromMSE
+from utility_functions import PSNR, make_coord, str2bool, ssim, PSNRfromMSE
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
@@ -58,7 +58,7 @@ class Trainer():
         start_time = time.time()
 
         loss = nn.MSELoss().to(self.opt["device"])
-        step = 1
+        step = 0
         item = item.to(self.opt['device'])
 
         
@@ -66,9 +66,6 @@ class Trainer():
         MSE_limit = 10 ** ((-1*target_PSNR + 20*log10(1.0))/10)
         
         model.init_octree(item.shape)
-        model.residual = torch.zeros_like(item, device=self.opt['device']).detach()
-
-        pe = PositionalEncoding(self.opt)
             
         for model_num in range(self.opt['octree_depth_end'] - self.opt['octree_depth_start']):
             print("Model %i, total parameter count: %i" % (model_num, model.count_parameters()))
@@ -78,6 +75,8 @@ class Trainer():
                         self.opt['gpus_per_node']*self.opt['num_nodes'] if self.opt['train_distributed'] else 1)
             block_positions = torch.tensor(block_positions, 
                     device=self.opt['device'])
+
+            model_caches = {}
 
             for epoch in range(self.opt['epoch'], self.opt['epochs']):
                 self.opt["epoch"] = epoch            
@@ -90,8 +89,9 @@ class Trainer():
                     blocks_this_iter = min(self.opt['max_blocks_per_iter'], len(blocks)-b)
 
                     if('2D' in self.opt['mode']):
-                        local_positions = torch.rand([blocks_this_iter,self.opt['local_queries_per_block'], 
+                        local_positions = torch.rand([blocks_this_iter,1, 
                             self.opt['local_queries_per_block'], 2], device=self.opt['device']) * 2 - 1
+                            
                         #print("Local positions shape: " + str(local_positions.shape))
                         '''
                         feat_grids = model.models[-1].feature_encoder(pe(block_positions[b:b+blocks_this_iter]))
@@ -103,22 +103,28 @@ class Trainer():
                         res = F.grid_sample(model.residual.expand([blocks_this_iter, -1, -1, -1]), global_positions, mode="bilinear", align_corners=False)
                         block_output = block_output.permute(0, 3, 1, 2) + res
                         '''
-                        block_output = model(blocks, block_positions, local_positions)
+                        #block_output = model(blocks, block_positions, local_positions)
                         #print("block_output shape: " + str(block_output.shape))
                         shapes = torch.tensor([block.shape for block in blocks[b:b+blocks_this_iter]], device=self.opt['device']).unsqueeze(1).unsqueeze(1)
                         poses = torch.tensor([block.pos for block in blocks[b:b+blocks_this_iter]], device=self.opt['device']).unsqueeze(1).unsqueeze(1)
-
+                        
                         global_positions = (local_positions.clone() + 1) / 2
                         global_positions[...,0] *= (shapes[...,2]/item.shape[2])
-                        global_positions[...,0] += (poses[...,1]/item.shape[2])
+                        global_positions[...,0] += (poses[...,0]/item.shape[2])
                         global_positions[...,0] *= 2
                         global_positions[...,0] -= 1
                         
                         global_positions[...,1] *= (shapes[...,3]/item.shape[3])
-                        global_positions[...,1] += (poses[...,0]/item.shape[3])
+                        global_positions[...,1] += (poses[...,1]/item.shape[3])
                         global_positions[...,1] *= 2
                         global_positions[...,1] -= 1
-                        block_item = F.grid_sample(item.expand([blocks_this_iter, -1, -1, -1]), global_positions, mode='bilinear', align_corners=False)
+                        global_positions = global_positions.flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()
+                        
+                        if((b, blocks_this_iter) not in model_caches.keys()):
+                            model_caches[(b, blocks_this_iter)] = model.block_index_to_global_indices_mapping(global_positions)
+
+                        block_output = model.forward_global_positions(global_positions, index_to_global_positions_indices=model_caches[(b, blocks_this_iter)])
+                        block_item = F.grid_sample(item.expand([-1, -1, -1, -1]), global_positions.flip(-1), mode='bilinear', align_corners=False)
                         #print("block_item shape: " + str(block_item.shape))
                     
                     block_error = loss(block_output,block_item) * (blocks_this_iter/len(blocks))
@@ -135,21 +141,7 @@ class Trainer():
                 #optim_scheduler.step()
                 
                 if(step % self.opt['log_every'] == 0 and (not self.opt['train_distributed'] or rank == 0)):
-                    with torch.no_grad():    
-                        reconstructed = model.get_full_img()    
-                        octree_blocks = model.octree.get_octree_block_img(self.opt['device'])            
-                        psnr = PSNR(reconstructed, item, torch.tensor(1.0))
-                        s = ssim(reconstructed, item)
-                        print("Iteration %i, MSE: %0.06f, PSNR (dB): %0.02f, SSIM: %0.03f" % \
-                            (epoch, block_error_sum.item(), psnr.item(), s.item()))
-                        writer.add_scalar('Training PSNR', PSNRfromMSE(block_error_sum, torch.tensor(1.0, device=self.opt['device'])), step)
-                        writer.add_scalar('PSNR', psnr.item(), step)
-                        writer.add_scalar('SSIM', s.item(), step)         
-                        if(len(model.models) > 1):
-                            writer.add_image("Network"+str(len(model.models)-1)+"residual", 
-                                ((reconstructed-model.residual)[0]+0.5).clamp_(0, 1), step)
-                        writer.add_image("reconstruction", reconstructed[0].clamp_(0, 1), step)
-                        writer.add_image("reconstruction_blocks", reconstructed[0].clamp_(0, 1)*octree_blocks[0], step)
+                    self.log_with_image(model, item, block_error_sum, writer, step)
 
                 elif(step % 5 == 0 and (not self.opt['train_distributed'] or rank == 0)):
                     print("Iteration %i, MSE: %0.06f" % \
@@ -162,21 +154,7 @@ class Trainer():
                     print("Saved model and octree")
                     
             if(not self.opt['train_distributed'] or rank == 0):
-                with torch.no_grad():    
-                    reconstructed = model.get_full_img()    
-                    octree_blocks = model.octree.get_octree_block_img(self.opt['device'])          
-                    psnr = PSNR(reconstructed, item, torch.tensor(1.0))
-                    s = ssim(reconstructed, item)
-                    print("Iteration %i, MSE: %0.06f, PSNR (dB): %0.02f, SSIM: %0.02f" % \
-                        (epoch, block_error_sum.item(), psnr.item(), s.item()))
-                    writer.add_scalar('Training PSNR', PSNRfromMSE(block_error_sum, torch.tensor(1.0, device=self.opt['device'])), step)
-                    writer.add_scalar('PSNR', psnr.item(), step)
-                    writer.add_scalar('SSIM', s.item(), step)         
-                    if(len(model.models) > 1):
-                        writer.add_image("Network"+str(len(model.models)-1)+"residual", 
-                            ((reconstructed-model.residual)[0]+0.5).clamp_(0, 1), step)
-                    writer.add_image("reconstruction_blocks", reconstructed[0].clamp_(0, 1)*octree_blocks[0], step)
-                    writer.add_image("reconstruction", reconstructed[0].clamp_(0, 1), step)
+                self.log_with_image(model, item, block_error_sum, writer, step)
 
 
             if((not self.opt['train_distributed'] or rank == 0) and \
@@ -184,8 +162,11 @@ class Trainer():
                 print("Total parameter count: %i" % model.count_parameters())   
                 print("Adding higher-resolution model")   
                 with torch.no_grad():                                    
-                    model.residual = model.get_full_img().detach()
-                    model.calculate_block_errors(loss, item)
+                    sample_points = make_coord(item.shape[2:], self.opt['device'], 
+                        flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()       
+                    reconstructed = model.forward_global_positions(sample_points)    
+                    reconstructed = reconstructed.reshape(item.shape)
+
                 model.add_model(torch.tensor([1.0], dtype=torch.float32, device=self.opt['device']))
                 model.to(self.opt['device'])
 
@@ -194,8 +175,7 @@ class Trainer():
 
                 if(self.opt['error_bound_split']):
                     #model.octree.split_from_error_max_depth(MSE_limit)
-                    model.octree.split_from_error_max_depth(item, model.residual, loss, MSE_limit)
-                    
+                    model.octree.split_from_error_max_depth(reconstructed, item, loss, MSE_limit)
                 else:
                     model.octree.split_all_at_depth(model.octree.max_depth())
 
@@ -219,6 +199,27 @@ class Trainer():
             save_model(model, self.opt)
             print("Saved model")
 
+    def log_with_image(self, model, item, block_error_sum, writer, step):
+        with torch.no_grad():    
+            sample_points = make_coord(item.shape[2:], self.opt['device'], 
+                flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()            
+            reconstructed = model.forward_global_positions(sample_points)    
+            reconstructed = reconstructed.reshape(item.shape)
+            octree_blocks = model.octree.get_octree_block_img(self.opt['device'])            
+            psnr = PSNR(reconstructed, item, torch.tensor(1.0))
+            s = ssim(reconstructed, item)
+            print("Iteration %i, MSE: %0.06f, PSNR (dB): %0.02f, SSIM: %0.03f" % \
+                (step, block_error_sum.item(), psnr.item(), s.item()))
+            writer.add_scalar('Training PSNR', PSNRfromMSE(block_error_sum, torch.tensor(1.0, device=self.opt['device'])), step)
+            writer.add_scalar('PSNR', psnr.item(), step)
+            writer.add_scalar('SSIM', s.item(), step)         
+            if(len(model.models) > 1):
+                res = model.forward_global_positions(sample_points, depth_end=model.octree.max_depth())    
+                res = res.reshape(item.shape)
+                writer.add_image("Network"+str(len(model.models)-1)+"residual", 
+                    ((reconstructed-res)[0]+0.5).clamp_(0, 1), step)
+            writer.add_image("reconstruction", reconstructed[0].clamp_(0, 1), step)
+            writer.add_image("reconstruction_blocks", reconstructed[0].clamp_(0, 1)*octree_blocks[0], step)
 
 
 if __name__ == '__main__':
