@@ -14,7 +14,7 @@ from math import pi
 from pytorch_memlab import LineProfiler, MemReporter, profile, profile_every
 from torch.utils.checkpoint import checkpoint_sequential, checkpoint
 import time
-from torch.multiprocessing import Pool
+from torch.multiprocessing import Pool, spawn
 
 file_folder_path = os.path.dirname(os.path.abspath(__file__))
 project_folder_path = os.path.join(file_folder_path, "..")
@@ -506,11 +506,12 @@ class HierarchicalACORN(nn.Module):
                 
                 out += out_temp
             else:
-                with Pool(len(blocks)) as p:
-                    for i in range(len(blocks)):
-                        p.apply(self.block_forward, (i, model_no, blocks, local_positions_at_depth, 
-                            index_to_global_positions_indices, feat_grids, out))
+                
+                spawn(self.block_forward, model_no, blocks,local_positions_at_depth, 
+                            index_to_global_positions_indices, feat_grids, out)
                 #for i in range(len(blocks)):
+                #    self.block_forward(i, model_no, blocks,local_positions_at_depth, 
+                #            index_to_global_positions_indices, feat_grids, out)
                     '''
                     global_positions_within_block = global_positions[...,index_to_global_positions_indices[blocks[i].index],:]
                     t = time.time()
