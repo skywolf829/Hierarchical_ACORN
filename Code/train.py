@@ -80,12 +80,14 @@ class Trainer():
             block_positions = torch.tensor(block_positions, 
                     device=self.opt['device'])
             if(self.opt['train_distributed']):
-                num_blocks = len(model.octree.depth_to_nodes[model.octree.max_depth].values())
+                num_blocks = len(model.octree.depth_to_nodes[model.octree.max_depth()].values())
                 if(num_blocks > 
                     self.opt['num_nodes'] * self.opt['gpus_per_node']):
                     g = new_group(list(range(num_blocks)), backend='nccl')
                 else:
                     g = new_group()
+                if(rank == 0):
+                    print("Group is " + str(g))
             model_caches = {}
 
             for epoch in range(self.opt['epoch'], self.opt['epochs']):
