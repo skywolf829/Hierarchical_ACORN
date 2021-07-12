@@ -83,8 +83,8 @@ class Trainer():
                 print("Blocks: " + str(num_blocks))
                 if(num_blocks < 
                     self.opt['num_nodes'] * self.opt['gpus_per_node']):
-                    g = new_group(list(range(num_blocks)), backend='nccl')
                     print("Rank " + str(rank) + ", making new group: " + str(list(range(num_blocks))))
+                    g = new_group(list(range(num_blocks)), backend='nccl')
                 else:
                     g = new_group()
             model_caches = {}
@@ -194,7 +194,7 @@ class Trainer():
 
                 model.add_model(torch.tensor([1.0], dtype=torch.float32, device=self.opt['device']))
                 model.to(rank)
-                
+
                 if(rank == 0):
                     print("Last error: " + str(block_error_sum.item()))
 
