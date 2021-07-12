@@ -506,8 +506,8 @@ class HierarchicalACORN(nn.Module):
                 
                 out += out_temp
             else:                
-                spawn(self.block_forward, model_no, blocks,local_positions_at_depth, 
-                            index_to_global_positions_indices, feat_grids, out)
+                spawn(self.block_forward, args=(model_no, blocks,local_positions_at_depth, 
+                            index_to_global_positions_indices, feat_grids, out))
                 '''
                 for i in range(len(blocks)):
                     self.block_forward(i, model_no, blocks,local_positions_at_depth, 
