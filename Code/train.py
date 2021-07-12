@@ -41,8 +41,7 @@ class Trainer():
             )
             model = model.to(rank)
             #model = DDP(model, device_ids=[rank])
-            if(rank == 0): 
-                print("Training in parallel")
+            print("Training in parallel, device " + str(rank))
         else:
             print("Training on " + self.opt['device'])
             model = model.to(self.opt['device'])
