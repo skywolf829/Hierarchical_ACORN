@@ -181,20 +181,22 @@ class Trainer():
                 self.log_with_image(model, item, block_error_sum, writer, step)
 
 
-            if(rank == 0 and \
-                model_num < self.opt['octree_depth_end'] - self.opt['octree_depth_start']-1):
-                print("Total parameter count: %i" % model.count_parameters())   
-                print("Adding higher-resolution model")   
-                with torch.no_grad():                                    
-                    sample_points = make_coord(item.shape[2:], self.opt['device'], 
-                        flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()       
-                    reconstructed = model.forward_global_positions(sample_points)    
-                    reconstructed = reconstructed.reshape(item.shape)
+            if(model_num < self.opt['octree_depth_end'] - self.opt['octree_depth_start']-1):
+
+                if(rank == 0):
+                    print("Total parameter count: %i" % model.count_parameters())   
+                    print("Adding higher-resolution model")   
+                    with torch.no_grad():                                    
+                        sample_points = make_coord(item.shape[2:], self.opt['device'], 
+                            flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()       
+                        reconstructed = model.forward_global_positions(sample_points)    
+                        reconstructed = reconstructed.reshape(item.shape)
 
                 model.add_model(torch.tensor([1.0], dtype=torch.float32, device=self.opt['device']))
-                model.to(self.opt['device'])
-
-                print("Last error: " + str(block_error_sum.item()))
+                model.to(rank)
+                
+                if(rank == 0):
+                    print("Last error: " + str(block_error_sum.item()))
 
                 if(self.opt['error_bound_split']):
                     model.octree.split_from_error_max_depth(reconstructed, item, loss, MSE_limit)
