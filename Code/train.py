@@ -89,8 +89,8 @@ class Trainer():
                     g = new_group()
             model_caches = {}
             
+            print("Model " + str(rank) + ": blocks " + str(len(blocks)))
             if(len(blocks) > 0):
-                print("Model " + str(rank) + ": blocks " + str(len(blocks)))
                 for epoch in range(self.opt['epoch'], self.opt['epochs']):
                     self.opt["epoch"] = epoch            
                     model.zero_grad()           
