@@ -186,11 +186,11 @@ class Trainer():
                 if(rank == 0):
                     print("Total parameter count: %i" % model.count_parameters())   
                     print("Adding higher-resolution model")   
-                    with torch.no_grad():                                    
-                        sample_points = make_coord(item.shape[2:], self.opt['device'], 
-                            flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()       
-                        reconstructed = model.forward_global_positions(sample_points)    
-                        reconstructed = reconstructed.reshape(item.shape)
+                with torch.no_grad():                                    
+                    sample_points = make_coord(item.shape[2:], self.opt['device'], 
+                        flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()       
+                    reconstructed = model.forward_global_positions(sample_points)    
+                    reconstructed = reconstructed.reshape(item.shape)
 
                 model.add_model(torch.tensor([1.0], dtype=torch.float32, device=self.opt['device']))
                 model.to(rank)
