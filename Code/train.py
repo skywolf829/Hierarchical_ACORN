@@ -80,6 +80,7 @@ class Trainer():
                     device=self.opt['device'])
             if(self.opt['train_distributed']):
                 num_blocks = len(model.octree.depth_to_nodes[model.octree.max_depth()].values())
+                print("Blocks: " + str(num_blocks))
                 if(num_blocks > 
                     self.opt['num_nodes'] * self.opt['gpus_per_node']):
                     g = new_group(list(range(num_blocks)), backend='nccl')
