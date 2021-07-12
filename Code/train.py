@@ -20,6 +20,7 @@ from models import HierarchicalACORN, PositionalEncoding
 import argparse
 from pytorch_memlab import LineProfiler, MemReporter, profile
 from torch.utils.checkpoint import checkpoint_sequential, checkpoint
+from torch.multiprocessing import spawn
 import h5py
 
 class Trainer():
@@ -28,6 +29,7 @@ class Trainer():
         torch.manual_seed(0b10101010101010101010101010101010)
 
     def train(self, rank, model, item):
+        torch.manual_seed(0)
         if(self.opt['train_distributed']):
             self.opt['device'] = "cuda:" + str(rank)
             dist.init_process_group(                                   
@@ -37,7 +39,7 @@ class Trainer():
                 rank=rank                                               
             )
             model = model.to(rank)
-            model = DDP(model, device_ids=[rank])
+            #model = DDP(model, device_ids=[rank])
             if(rank == 0): 
                 print("Training in parallel")
         else:
@@ -81,7 +83,7 @@ class Trainer():
             for epoch in range(self.opt['epoch'], self.opt['epochs']):
                 self.opt["epoch"] = epoch            
                 model.zero_grad()           
-
+                
                 block_error_sum = 0                
                 
                 b = 0
@@ -137,8 +139,13 @@ class Trainer():
                     b += blocks_this_iter
                     
 
-                #block_error_sum *= (1/len(blocks))
-                #block_error_sum.backward()
+                if self.opt['train_distributed']:
+                    # Grad averaging for dist training
+                    size = float(dist.get_world_size())
+                    for param in model.models[-1].parameters():
+                        dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
+                        param.grad.data /= size
+
                 model_optim.step()
                 #optim_scheduler.step()
                 
@@ -155,11 +162,11 @@ class Trainer():
                     save_model(model, self.opt)
                     print("Saved model and octree")
                     
-            if(not self.opt['train_distributed'] or rank == 0):
+            if(rank == 0):
                 self.log_with_image(model, item, block_error_sum, writer, step)
 
 
-            if((not self.opt['train_distributed'] or rank == 0) and \
+            if(rank == 0 and \
                 model_num < self.opt['octree_depth_end'] - self.opt['octree_depth_start']-1):
                 print("Total parameter count: %i" % model.count_parameters())   
                 print("Adding higher-resolution model")   
@@ -173,10 +180,8 @@ class Trainer():
                 model.to(self.opt['device'])
 
                 print("Last error: " + str(block_error_sum.item()))
-                #model.errors.append(block_error_sum.item()**0.5)
 
                 if(self.opt['error_bound_split']):
-                    #model.octree.split_from_error_max_depth(MSE_limit)
                     model.octree.split_from_error_max_depth(reconstructed, item, loss, MSE_limit)
                 else:
                     model.octree.split_all_at_depth(model.octree.max_depth())
@@ -193,7 +198,7 @@ class Trainer():
                 self.opt['epoch'] = 0
                 torch.cuda.empty_cache()
         
-        if(not self.opt['train_distributed'] or rank == 0):
+        if(rank == 0):
             print("Total parameter count: %i" % model.count_parameters())   
             end_time = time.time()
             total_time = end_time - start_time
@@ -288,7 +293,6 @@ if __name__ == '__main__':
     if(not opt['train_distributed']):
         trainer.train(0, model, item)
     else:
-        #to be implemented
-        print("not implemented yet")
+        spawn(trainer.train, args=(model, item), nprocs=opt['num_nodes']*opt['gpus_per_node'])
     print(prof.display())
     prof.disable()
