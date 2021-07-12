@@ -84,7 +84,7 @@ class Trainer():
                 if(num_blocks < 
                     self.opt['num_nodes'] * self.opt['gpus_per_node']):
                     g = new_group(list(range(num_blocks)), backend='nccl')
-                    print("Rank " + str(rank) + ", Group is " + str(list(range(num_blocks))))
+                    print("Rank " + str(rank) + ", making new group: " + str(list(range(num_blocks))))
                 else:
                     g = new_group()
             model_caches = {}
@@ -174,6 +174,7 @@ class Trainer():
                         print("Saved model and octree")
             
             if(self.opt['train_distributed']):
+                print("Rank " + str(rank) + " waiting at barrier")
                 barrier()  
 
             if(rank == 0):
