@@ -70,6 +70,7 @@ class Trainer():
         model.init_octree(item.shape)
             
         for model_num in range(self.opt['octree_depth_end'] - self.opt['octree_depth_start']):
+            barrier()
             if(rank == 0):
                 print("Model %i, total parameter count: %i" % (model_num, model.count_parameters()))
             blocks, block_positions = model.octree.depth_to_blocks_and_block_positions(
