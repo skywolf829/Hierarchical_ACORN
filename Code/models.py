@@ -449,14 +449,6 @@ class HierarchicalACORN(nn.Module):
 
         return index_to_global_positions_indices
     
-    def block_forward(self, i, model_no, blocks, local_pos, local_pos_indicies, feat_grids, out):
-        local_positions_in_block = local_pos[...,local_pos_indicies[blocks[i].index],:]
-        if(local_positions_in_block.shape[-2] > 0):
-            feat = F.grid_sample(feat_grids[i:i+1], local_positions_in_block, mode='bilinear', align_corners=False)
-            feat = self.models[model_no].vol2FC(feat)
-            out_temp = self.models[model_no].FC2vol(self.models[model_no].feature_decoder(feat))
-            out[...,local_pos_indicies[blocks[i].index]] += out_temp
-
     def forward_global_positions(self, global_positions, index_to_global_positions_indices=None, 
     depth_start=None, depth_end=None, local_positions=None, block_start=None):
         if depth_start is None:
@@ -505,22 +497,15 @@ class HierarchicalACORN(nn.Module):
                 out_temp = self.models[model_no].FC2vol(out_temp)
                 
                 out += out_temp
-            else:                
-                spawn(self.block_forward, args=(model_no, blocks,local_positions_at_depth, 
-                            index_to_global_positions_indices, feat_grids, out),
-                            nprocs=len(blocks))
-                '''
+            else:  
                 for i in range(len(blocks)):
-                    self.block_forward(i, model_no, blocks,local_positions_at_depth, 
-                            index_to_global_positions_indices, feat_grids, out)
-
                     local_positions_in_block = local_positions_at_depth[...,index_to_global_positions_indices[blocks[i].index],:]
                     if(local_positions_in_block.shape[-2] > 0):
                         feat = F.grid_sample(feat_grids[i:i+1], local_positions_in_block, mode='bilinear', align_corners=False)
                         feat = self.models[model_no].vol2FC(feat)
                         out_temp = self.models[model_no].FC2vol(self.models[model_no].feature_decoder(feat))
                         out[...,index_to_global_positions_indices[blocks[i].index]] += out_temp
-                '''
+                
             #print("Model at depth %i took %f seconds" % (depth, time.time()-model_start_time))
         
         #print("Feedforward for %i points took %f seconds" % (global_positions.shape[-2], time.time()-start_time))
