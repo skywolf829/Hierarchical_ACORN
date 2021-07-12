@@ -175,9 +175,11 @@ class OctreeNodeList:
         return block_positions
 
     def depth_to_blocks_and_block_positions(self, depth_level, rank=0, num_splits=1):
-        blocks = list(self.depth_to_nodes[depth_level].values())[rank::num_splits]
-        if(rank > len(blocks)):
+        blocks = list(self.depth_to_nodes[depth_level].values())
+        if(rank < len(blocks)):
             blocks = []
+        else:            
+            blocks = blocks[rank::num_splits]
         block_positions = self.blocks_to_positions(blocks)
         
         return blocks, block_positions
