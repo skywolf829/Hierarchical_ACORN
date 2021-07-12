@@ -33,7 +33,7 @@ class Options():
         opt["num_nodes"]               = 1
         opt["ranking"]                 = 0
 
-        opt["epochs"]                  = 3000
+        opt["epochs"]                  = 5000
         opt["lr"]                      = 0.001
         opt["beta_1"]                  = 0.5
         opt["beta_2"]                  = 0.999
