@@ -173,8 +173,9 @@ class Trainer():
                         save_model(model, self.opt)
                         print("Saved model and octree")
             
-            barrier()  
-                      
+            if(self.opt['train_distributed']):
+                barrier()  
+
             if(rank == 0):
                 self.log_with_image(model, item, block_error_sum, writer, step)
 
