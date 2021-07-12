@@ -21,6 +21,7 @@ import argparse
 from pytorch_memlab import LineProfiler, MemReporter, profile
 from torch.utils.checkpoint import checkpoint_sequential, checkpoint
 from torch.multiprocessing import spawn
+from torch.distributed import new_group, barrier
 import h5py
 
 class Trainer():
@@ -70,14 +71,21 @@ class Trainer():
         model.init_octree(item.shape)
             
         for model_num in range(self.opt['octree_depth_end'] - self.opt['octree_depth_start']):
-            print("Model %i, total parameter count: %i" % (model_num, model.count_parameters()))
+            if(rank == 0):
+                print("Model %i, total parameter count: %i" % (model_num, model.count_parameters()))
             blocks, block_positions = model.octree.depth_to_blocks_and_block_positions(
                         model.octree.max_depth(), 
                         rank, 
                         self.opt['gpus_per_node']*self.opt['num_nodes'] if self.opt['train_distributed'] else 1)
             block_positions = torch.tensor(block_positions, 
                     device=self.opt['device'])
-
+            if(self.opt['train_distributed']):
+                num_blocks = len(model.octree.depth_to_nodes[model.octree.max_depth].values())
+                if(num_blocks > 
+                    self.opt['num_nodes'] * self.opt['gpus_per_node']):
+                    g = new_group(list(range(num_blocks)), backend='nccl')
+                else:
+                    g = new_group()
             model_caches = {}
 
             for epoch in range(self.opt['epoch'], self.opt['epochs']):
@@ -143,10 +151,11 @@ class Trainer():
                     # Grad averaging for dist training
                     size = float(dist.get_world_size())
                     for param in model.models[-1].parameters():
-                        dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
+                        dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM, group=g)
                         param.grad.data /= size
 
                 model_optim.step()
+                barrier()
                 #optim_scheduler.step()
                 
                 if(step % self.opt['log_every'] == 0 and (not self.opt['train_distributed'] or rank == 0)):
