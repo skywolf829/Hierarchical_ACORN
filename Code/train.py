@@ -293,6 +293,8 @@ if __name__ == '__main__':
     if(not opt['train_distributed']):
         trainer.train(0, model, item)
     else:
+        os.environ['MASTER_ADDR'] = '127.0.0.1'
+        os.environ['MASTER_PORT'] = '29500'
         spawn(trainer.train, args=(model, item), nprocs=opt['num_nodes']*opt['gpus_per_node'])
     print(prof.display())
     prof.disable()
