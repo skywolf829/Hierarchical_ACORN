@@ -22,6 +22,16 @@ class OctreeNode:
         self.last_loss : float = 0
         self.parent = None
         self.children = []
+        self.bounding_box = []
+        for i in range(len(pos)):
+            dim_start = pos[i]
+            dim_end = pos[i] + shape[2+i]
+            dim_start *= (2/node_list.full_shape[2+i])
+            dim_end *= (2/node_list.full_shape[2+i])
+            dim_start -= 1
+            dim_end -= 1
+            self.bounding_box.append(dim_start)
+            self.bounding_box.append(dim_end)
 
     def __str__(self) -> str:
         return "{ data_shape: " + str(self.shape) + ", " + \
@@ -170,6 +180,7 @@ class OctreeNodeList:
         
         return blocks, block_positions
 
+    '''
     def index_to_bounding_box(self, index, depth):
         bounding_box = []
         box_pos = self.depth_to_nodes[depth][index].pos
@@ -185,15 +196,30 @@ class OctreeNodeList:
             bounding_box.append(dim_end)
             
         return bounding_box
+    '''
 
     def global_to_local(self, global_coords, index, depth):
         local_coords = global_coords.clone()
-        bounding_box = self.index_to_bounding_box(index, depth)
+        bounding_box = self.depth_to_nodes[depth][index].bounding_box
         for i in range(0, len(bounding_box), 2):
             dim_width = bounding_box[i+1] - bounding_box[i]
             local_coords[...,int(i/2)] -= bounding_box[i]
             local_coords[...,int(i/2)] *= (2/dim_width)
             local_coords[...,int(i/2)] -= 1
+        return local_coords
+
+    def global_to_local_batch(self, global_coords, depth):
+        local_coords = global_coords.clone()
+
+        # shift to [0, 2]
+        local_coords += 1
+        # mod by block relative size
+        local_coords %= 2**(1-depth)
+        # scale each block between 0-2
+        local_coords *= 2**depth
+        # translate block back to [-1, 1]
+        local_coords -= 1
+
         return local_coords
 
     def delete_depth_level(self, depth_level):

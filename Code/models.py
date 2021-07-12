@@ -14,6 +14,7 @@ from math import pi
 from pytorch_memlab import LineProfiler, MemReporter, profile, profile_every
 from torch.utils.checkpoint import checkpoint_sequential, checkpoint
 import time
+from torch.multiprocessing import Pool
 
 file_folder_path = os.path.dirname(os.path.abspath(__file__))
 project_folder_path = os.path.join(file_folder_path, "..")
@@ -438,7 +439,7 @@ class HierarchicalACORN(nn.Module):
         index_to_global_positions_indices = {}
         for depth in range(self.octree.min_depth(), self.octree.max_depth()+1):
             for block in self.octree.depth_to_nodes[depth].values():
-                block_bbox = self.octree.index_to_bounding_box(block.index, block.depth)
+                block_bbox = block.bounding_box
                 mask = global_positions[0,0,...,0] >= block_bbox[0]
                 mask = torch.logical_and(mask,global_positions[0,0,...,0] < block_bbox[1])
                 for i in range(1, global_positions.shape[-1]):                    
@@ -448,7 +449,16 @@ class HierarchicalACORN(nn.Module):
 
         return index_to_global_positions_indices
     
-    def forward_global_positions(self, global_positions, index_to_global_positions_indices=None, depth_start=None, depth_end=None):
+    def block_forward(self, i, model_no, blocks, local_pos, local_pos_indicies, feat_grids, out):
+        local_positions_in_block = local_pos[...,local_pos_indicies[blocks[i].index],:]
+        if(local_positions_in_block.shape[-2] > 0):
+            feat = F.grid_sample(feat_grids[i:i+1], local_positions_in_block, mode='bilinear', align_corners=False)
+            feat = self.models[model_no].vol2FC(feat)
+            out_temp = self.models[model_no].FC2vol(self.models[model_no].feature_decoder(feat))
+            out[...,local_pos_indicies[blocks[i].index]] += out_temp
+
+    def forward_global_positions(self, global_positions, index_to_global_positions_indices=None, 
+    depth_start=None, depth_end=None, local_positions=None, block_start=None):
         if depth_start is None:
             depth_start = self.opt['octree_depth_start']
         if depth_end is None:
@@ -482,20 +492,44 @@ class HierarchicalACORN(nn.Module):
             feat_grids = self.models[model_no].feature_encoder(encoded_positions)
             self.models[model_no].feat_grid_shape[0] = feat_grids.shape[0]
             feat_grids = feat_grids.reshape(self.models[model_no].feat_grid_shape)
-            for i in range(len(blocks)):
-                global_positions_within_block = global_positions[...,index_to_global_positions_indices[blocks[i].index],:]
-                t = time.time()
-                local_positions = self.octree.global_to_local(global_positions_within_block, blocks[i].index, blocks[i].depth)
-                global_to_local_time += time.time() - t
-                if(local_positions.shape[-2] > 0):
-                    feat = F.grid_sample(feat_grids[i:i+1], local_positions, mode='bilinear', align_corners=False)
-                    feat = self.models[model_no].vol2FC(feat)
-                    out_temp = self.models[model_no].FC2vol(self.models[model_no].feature_decoder(feat))
-                    out[...,index_to_global_positions_indices[blocks[i].index]] += out_temp
+            
+            local_positions_at_depth = self.octree.global_to_local_batch(
+                global_positions, depth)
+            
+            if(depth == depth_end-1 and local_positions is not None):
+                feat = F.grid_sample(feat_grids[block_start:block_start+local_positions.shape[0]], 
+                    local_positions, mode='bilinear', align_corners=False)
+                feat = self.models[model_no].vol2FC(feat)
+                out_temp = self.models[model_no].feature_decoder(feat)
+                out_temp = out_temp.flatten(0, -2).unsqueeze(0).unsqueeze(0)
+                out_temp = self.models[model_no].FC2vol(out_temp)
+                
+                out += out_temp
+            else:
+                with Pool(len(blocks)) as p:
+                    for i in range(len(blocks)):
+                        p.apply(self.block_forward, (i, model_no, blocks, local_positions_at_depth, 
+                            index_to_global_positions_indices, feat_grids, out))
+                #for i in range(len(blocks)):
+                    '''
+                    global_positions_within_block = global_positions[...,index_to_global_positions_indices[blocks[i].index],:]
+                    t = time.time()
+                    local_positions = self.octree.global_to_local(global_positions_within_block, blocks[i].index, blocks[i].depth)
+                    global_to_local_time += time.time() - t
+                    '''
+
+
+                    '''
+                    local_positions_in_block = local_positions_at_depth[...,index_to_global_positions_indices[blocks[i].index],:]
+                    if(local_positions_in_block.shape[-2] > 0):
+                        feat = F.grid_sample(feat_grids[i:i+1], local_positions_in_block, mode='bilinear', align_corners=False)
+                        feat = self.models[model_no].vol2FC(feat)
+                        out_temp = self.models[model_no].FC2vol(self.models[model_no].feature_decoder(feat))
+                        out[...,index_to_global_positions_indices[blocks[i].index]] += out_temp
+                    '''
             #print("Model at depth %i took %f seconds" % (depth, time.time()-model_start_time))
         
         #print("Feedforward for %i points took %f seconds" % (global_positions.shape[-2], time.time()-start_time))
-        #print("Time of that feedforward on global_to_local %f" % (global_to_local_time))
         return out
                 
     def get_full_img_no_residual(self):  

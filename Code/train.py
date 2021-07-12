@@ -89,7 +89,7 @@ class Trainer():
                     blocks_this_iter = min(self.opt['max_blocks_per_iter'], len(blocks)-b)
 
                     if('2D' in self.opt['mode']):
-                        local_positions = torch.rand([blocks_this_iter,1, 
+                        local_positions = torch.rand([blocks_this_iter, 1, 
                             self.opt['local_queries_per_block'], 2], device=self.opt['device']) * 2 - 1
                             
                         #print("Local positions shape: " + str(local_positions.shape))
@@ -123,7 +123,9 @@ class Trainer():
                         if((b, blocks_this_iter) not in model_caches.keys()):
                             model_caches[(b, blocks_this_iter)] = model.block_index_to_global_indices_mapping(global_positions)
 
-                        block_output = model.forward_global_positions(global_positions, index_to_global_positions_indices=model_caches[(b, blocks_this_iter)])
+                        block_output = model.forward_global_positions(global_positions, 
+                            index_to_global_positions_indices=model_caches[(b, blocks_this_iter)],
+                            local_positions=local_positions, block_start=b)
                         block_item = F.grid_sample(item.expand([-1, -1, -1, -1]), global_positions.flip(-1), mode='bilinear', align_corners=False)
                         #print("block_item shape: " + str(block_item.shape))
                     
