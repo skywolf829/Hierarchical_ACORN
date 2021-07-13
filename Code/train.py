@@ -33,13 +33,14 @@ class Trainer():
         torch.manual_seed(0)
         if(self.opt['train_distributed']):
             self.opt['device'] = "cuda:" + str(rank)
+            model.opt = self.opt
             dist.init_process_group(                                   
                 backend='nccl',                                         
                 init_method='env://',                                   
                 world_size = self.opt['num_nodes'] * self.opt['gpus_per_node'],                              
                 rank=rank                                               
             )
-            model = model.to(rank)
+            model = model.to(self.opt['device'])
             #model = DDP(model, device_ids=[rank])
             print("Training in parallel, device " + str(rank))
         else:
@@ -193,7 +194,7 @@ class Trainer():
                     reconstructed = model.forward_global_positions(sample_points)    
                     reconstructed = reconstructed.reshape(item.shape)
 
-                model.to(rank)
+                model = model.to(self.opt['device'])
 
                 if(rank == 0):
                     print("Last error: " + str(block_error_sum.item()))
