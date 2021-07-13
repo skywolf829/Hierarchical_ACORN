@@ -21,7 +21,7 @@ import argparse
 from pytorch_memlab import LineProfiler, MemReporter, profile
 from torch.utils.checkpoint import checkpoint_sequential, checkpoint
 from torch.multiprocessing import spawn
-from torch.distributed import new_group, barrier, group
+from torch.distributed import new_group, barrier, group, broadcast
 import h5py
 
 class Trainer():
@@ -217,7 +217,11 @@ class Trainer():
                 for param in model.models[model_num].parameters():
                     param.requires_grad = False
                 self.opt['epoch'] = 0
-        
+                
+        if(self.opt['train_distributed']):
+            for param in model.models[model_num].parameters():
+                broadcast(param, 0)
+
         if(rank == 0):
             print("Total parameter count: %i" % model.count_parameters())   
             end_time = time.time()
