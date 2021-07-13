@@ -183,6 +183,9 @@ class Trainer():
             if(self.opt['train_distributed']):
                 print("Rank " + str(rank) + " waiting at barrier")
                 barrier()  
+                # Synchronize all models, whether they were training or not
+                for param in model.models[model_num].parameters():
+                    broadcast(param, 0)
 
             if(rank == 0):
                 self.log_with_image(model, item, block_error_sum, writer, step)
@@ -218,9 +221,7 @@ class Trainer():
                     param.requires_grad = False
                 self.opt['epoch'] = 0
 
-            if(self.opt['train_distributed']):
-                for param in model.models[model_num].parameters():
-                    broadcast(param, 0)
+            
 
         if(rank == 0):
             print("Total parameter count: %i" % model.count_parameters())   
