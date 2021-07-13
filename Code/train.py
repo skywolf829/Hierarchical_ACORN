@@ -162,7 +162,7 @@ class Trainer():
                         size = float(dist.get_world_size(g))
                         for param in model.models[model_num].parameters():
                             dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM, group=g)
-                            param.grad.data /= size
+                            #param.grad.data /= size
 
                     model_optim.step()
                     #optim_scheduler.step()
