@@ -73,7 +73,7 @@ class Trainer():
         for model_num in range(self.opt['octree_depth_end'] - self.opt['octree_depth_start']):
             if(self.opt['train_distributed']):
                 barrier()
-                
+
             model_optim = optim.Adam(model.models[model_num].parameters(), lr=self.opt["lr"], 
                 betas=(self.opt["beta_1"],self.opt["beta_2"]))
 
@@ -159,7 +159,7 @@ class Trainer():
 
                     if self.opt['train_distributed']:
                         # Grad averaging for dist training
-                        size = float(dist.get_world_size())
+                        size = float(dist.get_world_size(g))
                         for param in model.models[model_num].parameters():
                             dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM, group=g)
                             param.grad.data /= size
@@ -209,8 +209,6 @@ class Trainer():
                 else:
                     model.octree.split_all_at_depth(model.octree.max_depth())
 
-                model_optim = optim.Adam(model.models[model_num+1].parameters(), lr=self.opt["lr"], 
-                    betas=(self.opt["beta_1"],self.opt["beta_2"]))
                 #optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=model_optim,
                 #    milestones=[self.opt['epochs']/5, 
                 #    2*self.opt['epochs']/5, 
