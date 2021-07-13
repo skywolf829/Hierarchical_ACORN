@@ -217,10 +217,10 @@ class Trainer():
                 for param in model.models[model_num].parameters():
                     param.requires_grad = False
                 self.opt['epoch'] = 0
-                
-        if(self.opt['train_distributed']):
-            for param in model.models[model_num].parameters():
-                broadcast(param, 0)
+
+            if(self.opt['train_distributed']):
+                for param in model.models[model_num].parameters():
+                    broadcast(param, 0)
 
         if(rank == 0):
             print("Total parameter count: %i" % model.count_parameters())   
