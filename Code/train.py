@@ -46,7 +46,7 @@ class Trainer():
             print("Training on " + self.opt['device'])
             model = model.to(self.opt['device'])
 
-        model_optim = optim.Adam(model.models[-1].parameters(), lr=self.opt["lr"], 
+        model_optim = optim.Adam(model.models[0].parameters(), lr=self.opt["lr"], 
             betas=(self.opt["beta_1"],self.opt["beta_2"]))
 
         #optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=model_optim,
@@ -55,7 +55,7 @@ class Trainer():
         #    3*self.opt['epochs']/5, 
         #    4*self.opt['epochs']/5],gamma=self.opt['gamma'])
 
-        if(not self.opt['train_distributed'] or rank == 0):
+        if(rank == 0):
             writer = SummaryWriter(os.path.join('tensorboard',self.opt['save_name']))
         start_time = time.time()
 
@@ -70,7 +70,8 @@ class Trainer():
         model.init_octree(item.shape)
             
         for model_num in range(self.opt['octree_depth_end'] - self.opt['octree_depth_start']):
-            barrier()
+            if(self.opt['train_distributed']):
+                barrier()
             if(rank == 0):
                 print("Model %i, total parameter count: %i" % (model_num, model.count_parameters()))
             blocks, block_positions = model.octree.depth_to_blocks_and_block_positions(
@@ -154,7 +155,7 @@ class Trainer():
                     if self.opt['train_distributed']:
                         # Grad averaging for dist training
                         size = float(dist.get_world_size())
-                        for param in model.models[-1].parameters():
+                        for param in model.models[model_num].parameters():
                             dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM, group=g)
                             param.grad.data /= size
 
@@ -186,14 +187,12 @@ class Trainer():
 
                 if(rank == 0):
                     print("Total parameter count: %i" % model.count_parameters())   
-                    print("Adding higher-resolution model")   
                 with torch.no_grad():                                    
                     sample_points = make_coord(item.shape[2:], self.opt['device'], 
                         flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()       
                     reconstructed = model.forward_global_positions(sample_points)    
                     reconstructed = reconstructed.reshape(item.shape)
 
-                model.add_model(torch.tensor([1.0], dtype=torch.float32, device=self.opt['device']))
                 model.to(rank)
 
                 if(rank == 0):
@@ -204,14 +203,14 @@ class Trainer():
                 else:
                     model.octree.split_all_at_depth(model.octree.max_depth())
 
-                model_optim = optim.Adam(model.models[-1].parameters(), lr=self.opt["lr"], 
+                model_optim = optim.Adam(model.models[model_num+1].parameters(), lr=self.opt["lr"], 
                     betas=(self.opt["beta_1"],self.opt["beta_2"]))
                 #optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=model_optim,
                 #    milestones=[self.opt['epochs']/5, 
                 #    2*self.opt['epochs']/5, 
                 #    3*self.opt['epochs']/5, 
                 #    4*self.opt['epochs']/5],gamma=self.opt['gamma'])
-                for param in model.models[-2].parameters():
+                for param in model.models[model_num].parameters():
                     param.requires_grad = False
                 self.opt['epoch'] = 0
                 torch.cuda.empty_cache()
@@ -305,6 +304,8 @@ if __name__ == '__main__':
         item = h5py.File(os.path.join(project_folder_path, opt['target_signal']), 'r')['data']
         item = torch.tensor(item).unsqueeze(0)
         model = HierarchicalACORN(opt)
+        for model_num in range(opt['octree_depth_end'] - opt['octree_depth_start']):
+            model.add_model(torch.tensor([1.0], dtype=torch.float32, device=opt['device']))
 
     trainer = Trainer(opt)
 
