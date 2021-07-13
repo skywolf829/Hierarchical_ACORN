@@ -41,6 +41,7 @@ class Trainer():
                 rank=rank                                               
             )
             model = model.to(self.opt['device'])
+            model.pe = PositionalEncoding(self.opt)
             #model = DDP(model, device_ids=[rank])
             print("Training in parallel, device " + str(rank))
         else:
@@ -195,6 +196,7 @@ class Trainer():
                     reconstructed = reconstructed.reshape(item.shape)
 
                 model = model.to(self.opt['device'])
+                model.pe = PositionalEncoding(self.opt)
 
                 if(rank == 0):
                     print("Last error: " + str(block_error_sum.item()))
