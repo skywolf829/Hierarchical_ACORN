@@ -48,8 +48,7 @@ class Trainer():
             print("Training on " + self.opt['device'])
             model = model.to(self.opt['device'])
 
-        model_optim = optim.Adam(model.models[0].parameters(), lr=self.opt["lr"], 
-            betas=(self.opt["beta_1"],self.opt["beta_2"]))
+        
 
         #optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=model_optim,
         #    milestones=[self.opt['epochs']/5, 
@@ -74,6 +73,10 @@ class Trainer():
         for model_num in range(self.opt['octree_depth_end'] - self.opt['octree_depth_start']):
             if(self.opt['train_distributed']):
                 barrier()
+                
+            model_optim = optim.Adam(model.models[model_num].parameters(), lr=self.opt["lr"], 
+                betas=(self.opt["beta_1"],self.opt["beta_2"]))
+
             if(rank == 0):
                 print("Model %i, total parameter count: %i" % (model_num, model.count_parameters()))
             blocks, block_positions = model.octree.depth_to_blocks_and_block_positions(
