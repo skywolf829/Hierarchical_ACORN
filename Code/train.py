@@ -213,7 +213,6 @@ class Trainer():
                 for param in model.models[model_num].parameters():
                     param.requires_grad = False
                 self.opt['epoch'] = 0
-                torch.cuda.empty_cache()
         
         if(rank == 0):
             print("Total parameter count: %i" % model.count_parameters())   
