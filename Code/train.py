@@ -21,7 +21,7 @@ import argparse
 from pytorch_memlab import LineProfiler, MemReporter, profile
 from torch.utils.checkpoint import checkpoint_sequential, checkpoint
 from torch.multiprocessing import spawn
-from torch.distributed import new_group, barrier
+from torch.distributed import new_group, barrier, group
 import h5py
 
 class Trainer():
@@ -90,7 +90,7 @@ class Trainer():
                     print("Rank " + str(rank) + ", making new group: " + str(list(range(num_blocks))))
                     g = new_group(list(range(num_blocks)), backend='nccl')
                 else:
-                    g = new_group()
+                    g = group.WORLD
             model_caches = {}
             
             print("Model " + str(rank) + ": blocks " + str(len(blocks)))
