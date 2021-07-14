@@ -235,31 +235,27 @@ class Trainer():
             save_model(model, self.opt)
             print("Saved model")
 
-    def log_with_image(self, model, item, block_error_sum, writer, step, rank=0):
+    def log_with_image(self, model, item, block_error_sum, writer, step):
         with torch.no_grad():    
             sample_points = make_coord(item.shape[2:], self.opt['device'], 
                 flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()            
             reconstructed = model.forward_global_positions(sample_points)    
             reconstructed = reconstructed.reshape(item.shape)
             octree_blocks = model.octree.get_octree_block_img(self.opt['device'])   
-            if(rank == 0):         
-                psnr = PSNR(reconstructed, item, torch.tensor(1.0))
-                s = ssim(reconstructed, item)
-                print("Iteration %i, MSE: %0.06f, PSNR (dB): %0.02f, SSIM: %0.03f" % \
-                    (step, block_error_sum.item(), psnr.item(), s.item()))
-                writer.add_scalar('Training PSNR', PSNRfromMSE(block_error_sum, torch.tensor(1.0, device=self.opt['device'])), step)
-                writer.add_scalar('PSNR', psnr.item(), step)
-                writer.add_scalar('SSIM', s.item(), step)         
-                if(len(model.models) > 1):
-                    res = model.forward_global_positions(sample_points, depth_end=model.octree.max_depth())    
-                    res = res.reshape(item.shape)
-                    writer.add_image("Network"+str(len(model.models)-1)+"residual", 
-                        ((reconstructed-res)[0]+0.5).clamp_(0, 1), step)
-                writer.add_image("reconstruction", reconstructed[0].clamp_(0, 1), step)
-                writer.add_image("reconstruction_blocks", reconstructed[0].clamp_(0, 1)*octree_blocks[0], step)
-
-            else:
-                writer.add_image("reconstruction_blocks_rank"+str(rank), reconstructed[0].clamp_(0, 1)*octree_blocks[0], step)
+            psnr = PSNR(reconstructed, item, torch.tensor(1.0))
+            s = ssim(reconstructed, item)
+            print("Iteration %i, MSE: %0.06f, PSNR (dB): %0.02f, SSIM: %0.03f" % \
+                (step, block_error_sum.item(), psnr.item(), s.item()))
+            writer.add_scalar('Training PSNR', PSNRfromMSE(block_error_sum, torch.tensor(1.0, device=self.opt['device'])), step)
+            writer.add_scalar('PSNR', psnr.item(), step)
+            writer.add_scalar('SSIM', s.item(), step)         
+            if(len(model.models) > 1):
+                res = model.forward_global_positions(sample_points, depth_end=model.octree.max_depth())    
+                res = res.reshape(item.shape)
+                writer.add_image("Network"+str(len(model.models)-1)+"residual", 
+                    ((reconstructed-res)[0]+0.5).clamp_(0, 1), step)
+            writer.add_image("reconstruction", reconstructed[0].clamp_(0, 1), step)
+            writer.add_image("reconstruction_blocks", reconstructed[0].clamp_(0, 1)*octree_blocks[0], step)
 
 
 
