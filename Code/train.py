@@ -44,6 +44,10 @@ class Trainer():
             model.pe = PositionalEncoding(self.opt)
             #model = DDP(model, device_ids=[rank])
             print("Training in parallel, device " + str(rank))
+            # Synchronize all models
+            for model_num in range(len(model.models)):
+                for param in model.models[model_num].parameters():
+                    broadcast(param, 0)
         else:
             print("Training on " + self.opt['device'])
             model = model.to(self.opt['device'])
