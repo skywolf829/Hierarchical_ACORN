@@ -107,10 +107,9 @@ class Trainer():
             if(len(blocks) > 0):
                 for epoch in range(self.opt['epoch'], self.opt['epochs']):
                     self.opt["epoch"] = epoch            
-                    model.zero_grad()           
+                    model.zero_grad()          
                     
-                    block_error_sum = 0                
-                    
+                    block_error_sum = torch.tensor(0, dtype=torch.float32, device=self.opt['device'])
                     b = 0
                     while b < len(blocks):
                         blocks_this_iter = min(self.opt['max_blocks_per_iter'], len(blocks)-b)
