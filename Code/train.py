@@ -99,7 +99,7 @@ class Trainer():
             model_caches = {}
             
             print("Model " + str(rank) + ": blocks " + str(len(blocks)))
-            block_error_sum = 0 
+            block_error_sum = torch.tensor(0, dtype=torch.float32, device=self.opt['device']) 
             if(len(blocks) > 0):
                 for epoch in range(self.opt['epoch'], self.opt['epochs']):
                     self.opt["epoch"] = epoch            
