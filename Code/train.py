@@ -62,8 +62,6 @@ class Trainer():
 
         if(rank == 0):
             writer = SummaryWriter(os.path.join('tensorboard',self.opt['save_name']))
-        else:
-            writer = SummaryWriter(os.path.join('tensorboard',self.opt['save_name']+"rank"+str(rank)))
         start_time = time.time()
 
         loss = nn.MSELoss().to(self.opt["device"])
