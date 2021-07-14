@@ -198,8 +198,8 @@ class Trainer():
                 for param in model.models[model_num].parameters():
                     broadcast(param, 0)
 
-            #if(rank == 0):
-            self.log_with_image(model, item, block_error_sum, writer, step)
+            if(rank == 0):
+                self.log_with_image(model, item, block_error_sum, writer, step)
 
 
             if(model_num < self.opt['octree_depth_end'] - self.opt['octree_depth_start']-1):
