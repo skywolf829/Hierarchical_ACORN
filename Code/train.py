@@ -97,6 +97,7 @@ class Trainer():
             model_caches = {}
             
             print("Model " + str(rank) + ": blocks " + str(len(blocks)))
+            block_error_sum = 0 
             if(len(blocks) > 0):
                 for epoch in range(self.opt['epoch'], self.opt['epochs']):
                     self.opt["epoch"] = epoch            
