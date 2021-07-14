@@ -86,33 +86,37 @@ class Trainer():
             if(rank == 0):
                 print("Model %i, total parameter count: %i" % (model_num, model.count_parameters()))
             blocks, block_positions = model.octree.depth_to_blocks_and_block_positions(
-                        model.octree.max_depth(), 
-                        rank, 
-                        self.opt['gpus_per_node']*self.opt['num_nodes'] if self.opt['train_distributed'] else 1)
+                        model.octree.max_depth())
             block_positions = torch.tensor(block_positions, 
                     device=self.opt['device'])
             if(self.opt['train_distributed']):
-                num_blocks = len(model.octree.depth_to_nodes[model.octree.max_depth()].values())
+                num_blocks = len(blocks)
                 print("Blocks: " + str(num_blocks))
                 if(num_blocks < 
                     self.opt['num_nodes'] * self.opt['gpus_per_node']):
                     print("Rank " + str(rank) + ", making new group: " + str(list(range(num_blocks))))
                     g = new_group(list(range(num_blocks)), backend='nccl')
+                    stride = num_blocks
                 else:
                     g = group.WORLD
+                    stride = self.opt['num_nodes'] * self.opt['gpus_per_node']
+            else:
+                stride = 1    
+            
             model_caches = {}
             
             print("Model " + str(rank) + ": blocks " + str(len(blocks)))
             block_error_sum = torch.tensor(0, dtype=torch.float32, device=self.opt['device']) 
-            if(len(blocks) > 0):
+            if(rank < len(blocks)):
                 for epoch in range(self.opt['epoch'], self.opt['epochs']):
                     self.opt["epoch"] = epoch            
                     model.zero_grad()          
                     
                     block_error_sum = torch.tensor(0, dtype=torch.float32, device=self.opt['device'])
-                    b = 0
-                    while b < len(blocks):
-                        blocks_this_iter = min(self.opt['max_blocks_per_iter'], len(blocks)-b)
+                    b = rank * int(len(blocks)/stride)
+                    b_stop = min((rank+1) * int(len(blocks)/stride), len(blocks))
+                    while b < b_stop:
+                        blocks_this_iter = min(self.opt['max_blocks_per_iter'], b_stop-b)
 
                         if('2D' in self.opt['mode']):
                             local_positions = torch.rand([blocks_this_iter, 1, 
