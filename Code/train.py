@@ -113,6 +113,9 @@ class Trainer():
                     block_error_sum = torch.tensor(0, dtype=torch.float32, device=self.opt['device'])
                     b = rank * int(len(blocks)/stride)
                     b_stop = min((rank+1) * int(len(blocks)/stride), len(blocks))
+                    if(rank == 0 and epoch == 0):
+                        writer.add_scalar("num_nodes", len(blocks), model_num)
+                        
                     while b < b_stop:
                         blocks_this_iter = min(self.opt['max_blocks_per_iter'], b_stop-b)
 
