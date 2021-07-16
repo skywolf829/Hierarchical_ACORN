@@ -31,6 +31,7 @@ class Trainer():
 
     def train(self, rank, model, item):
         torch.manual_seed(0)
+        rank = rank + self.opt['gpus_per_node']*self.opt['node_num']
         if(self.opt['train_distributed']):
             self.opt['device'] = "cuda:" + str(rank)
             model.opt = self.opt
@@ -43,7 +44,7 @@ class Trainer():
             model = model.to(self.opt['device'])
             model.pe = PositionalEncoding(self.opt)
             #model = DDP(model, device_ids=[rank])
-            print("Training in parallel, device " + str(rank))
+            print("Training in parallel, node + " + str(self.opt['node_num']) + " device cuda:" + str(rank))
             # Synchronize all models
             for model_num in range(len(model.models)):
                 for param in model.models[model_num].parameters():
@@ -92,7 +93,6 @@ class Trainer():
                 print("Blocks: " + str(num_blocks))
                 if(num_blocks < 
                     self.opt['num_nodes'] * self.opt['gpus_per_node']):
-                    print("Rank " + str(rank) + ", making new group: " + str(list(range(num_blocks))))
                     g = new_group(list(range(num_blocks)), backend='nccl')
                     stride = num_blocks
                 else:
@@ -103,7 +103,6 @@ class Trainer():
             
             model_caches = {}
             
-            print("Model " + str(rank) + ": blocks " + str(len(blocks)))
             block_error_sum = torch.tensor(0, dtype=torch.float32, device=self.opt['device']) 
             if(rank < len(blocks)):
                 for epoch in range(self.opt['epoch'], self.opt['epochs']):
@@ -115,7 +114,7 @@ class Trainer():
                     b_stop = min((rank+1) * int(len(blocks)/stride), len(blocks))
                     if(rank == 0 and epoch == 0):
                         writer.add_scalar("num_nodes", len(blocks), model_num)
-                        
+
                     while b < b_stop:
                         blocks_this_iter = min(self.opt['max_blocks_per_iter'], b_stop-b)
 
@@ -295,6 +294,7 @@ if __name__ == '__main__':
     parser.add_argument('--train_distributed',type=str2bool,default=None, help='Use distributed training')
     parser.add_argument('--gpus_per_node',default=None, type=int,help='Whether or not to save discriminators')
     parser.add_argument('--num_nodes',default=None, type=int,help='Whether or not to save discriminators')
+    parser.add_argument('--node_num',default=None, type=int,help='This nodes ID')
 
     parser.add_argument('--epochs',default=None, type=int,help='Number of epochs to use')
     parser.add_argument('--lr',default=None, type=float,help='Learning rate for the generator')    
@@ -335,6 +335,6 @@ if __name__ == '__main__':
     else:
         os.environ['MASTER_ADDR'] = '127.0.0.1'
         os.environ['MASTER_PORT'] = '29500'
-        spawn(trainer.train, args=(model, item), nprocs=opt['num_nodes']*opt['gpus_per_node'])
+        spawn(trainer.train, args=(model, item), nprocs=opt['gpus_per_node'])
     print(prof.display())
     prof.disable()

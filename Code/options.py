@@ -31,7 +31,7 @@ class Options():
         opt["train_distributed"]       = False
         opt["gpus_per_node"]           = 8
         opt["num_nodes"]               = 1
-        opt["ranking"]                 = 0
+        opt["node_num"]                = 0
 
         opt["epochs"]                  = 5000
         opt["lr"]                      = 0.001
