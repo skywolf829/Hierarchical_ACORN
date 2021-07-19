@@ -105,7 +105,11 @@ class Trainer():
             
             block_error_sum = torch.tensor(0, dtype=torch.float32, device=self.opt['device']) 
             if(rank < len(blocks)):
-                for epoch in range(self.opt['epoch'], self.opt['epochs']):
+                best_MSE = 1.0
+                best_MSE_epoch = 0
+                early_stop = False
+                epoch = self.opt['epoch']
+                while epoch < self.opt['epochs'] and not early_stop:
                     self.opt["epoch"] = epoch            
                     model.zero_grad()          
                     
@@ -114,13 +118,16 @@ class Trainer():
                     b_stop = min((rank+1) * int(len(blocks)/stride), len(blocks))
                     if(rank == 0 and epoch == 0):
                         writer.add_scalar("num_nodes", len(blocks), model_num)
+                    queries = max(int(self.opt['local_queries_per_iter'] / len(blocks)),
+                        self.opt['min_queries_per_block'])
 
                     while b < b_stop:
-                        blocks_this_iter = min(self.opt['max_blocks_per_iter'], b_stop-b)
+                        #blocks_this_iter = min(self.opt['max_blocks_per_iter'], b_stop-b)
+                        blocks_this_iter = b_stop-b
 
                         if('2D' in self.opt['mode']):
                             local_positions = torch.rand([blocks_this_iter, 1, 
-                                self.opt['local_queries_per_block'], 2], device=self.opt['device']) * 2 - 1
+                                queries, 2], device=self.opt['device']) * 2 - 1
                                 
                             #print("Local positions shape: " + str(local_positions.shape))
                             '''
@@ -174,10 +181,16 @@ class Trainer():
                             dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM, group=g)
                             #param.grad.data /= size
                         dist.all_reduce(block_error_sum, op=dist.ReduceOp.SUM, group=g)
-
+                    
                     model_optim.step()
                     #optim_scheduler.step()
                     
+                    if(block_error_sum > best_MSE and best_MSE_epoch < epoch - 100):
+                        early_stop = True
+                    else:
+                        best_MSE = block_error_sum
+                        best_MSE_epoch = epoch
+
                     if(step % self.opt['log_every'] == 0 and (not self.opt['train_distributed'] or rank == 0)):
                         self.log_with_image(model, item, block_error_sum, writer, step)
 
@@ -190,6 +203,7 @@ class Trainer():
                     if(epoch % self.opt['save_every'] == 0 and (not self.opt['train_distributed'] or rank == 0)):
                         save_model(model, self.opt)
                         print("Saved model and octree")
+                    epoch += 1
             
             if(self.opt['train_distributed']):
                 print("Rank " + str(rank) + " waiting at barrier")
@@ -280,7 +294,8 @@ if __name__ == '__main__':
     parser.add_argument('--feat_grid_x',default=None,type=int,help='X resolution of feature grid')
     parser.add_argument('--feat_grid_y',default=None,type=int,help='Y resolution of feature grid')
     parser.add_argument('--feat_grid_z',default=None,type=int,help='Z resolution of feature grid (if 3D)')
-    parser.add_argument('--local_queries_per_block',default=None,type=int,help='num queries per block while training')
+    parser.add_argument('--local_queries_per_iter',default=None,type=int,help='num queries per iteration while training')
+    parser.add_argument('--min_queries_per_block',default=None,type=int,help='min queries per block while training')
     parser.add_argument('--max_blocks_per_iter',default=None,type=int,help='max blocks in a batch per iter')
     parser.add_argument('--num_positional_encoding_terms',default=None,type=int,help='Number of positional encoding terms')
     parser.add_argument('--FC_size_exp_start',default=None,type=float,help='How large the FC layers start')

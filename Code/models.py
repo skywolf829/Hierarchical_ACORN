@@ -449,6 +449,8 @@ class HierarchicalACORN(nn.Module):
 
         return index_to_global_positions_indices
     
+    
+    @profile
     def forward_global_positions(self, global_positions, index_to_global_positions_indices=None, 
     depth_start=None, depth_end=None, local_positions=None, block_start=None):
         if depth_start is None:
@@ -503,8 +505,7 @@ class HierarchicalACORN(nn.Module):
                     if(local_positions_in_block.shape[-2] > 0):
                         feat = F.grid_sample(feat_grids[i:i+1], local_positions_in_block, mode='bilinear', align_corners=False)
                         feat = self.models[model_no].vol2FC(feat)
-                        out_temp = self.models[model_no].FC2vol(self.models[model_no].feature_decoder(feat))
-                        out[...,index_to_global_positions_indices[blocks[i].index]] += out_temp
+                        out[...,index_to_global_positions_indices[blocks[i].index]] += self.models[model_no].FC2vol(self.models[model_no].feature_decoder(feat))
                 
             #print("Model at depth %i took %f seconds" % (depth, time.time()-model_start_time))
         
