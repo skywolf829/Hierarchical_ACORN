@@ -455,7 +455,7 @@ class HierarchicalACORN(nn.Module):
     depth_start=None, depth_end=None, local_positions=None, block_start=None):
         if depth_start is None:
             depth_start = self.opt['octree_depth_start']
-        if self.opt['use_residual']:
+        if self.opt['use_residual'] and self.residual is not None:
             depth_start = self.octree.max_depth()
         if depth_end is None:
             depth_end = self.octree.max_depth()+1
@@ -473,7 +473,7 @@ class HierarchicalACORN(nn.Module):
         out = torch.zeros(out_shape, device=self.opt['device'])
         if(self.opt['use_residual'] and self.residual is not None):
             out += F.grid_sample(self.residual, 
-                    global_positions, mode='bilinear', align_corners=False).detach()
+                    global_positions.flip(-1), mode='bilinear', align_corners=False).detach()
 
 
         start_time = time.time()

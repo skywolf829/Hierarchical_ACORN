@@ -17,7 +17,7 @@ class Options():
         opt['feat_grid_x']              = 32
         opt['feat_grid_y']              = 32
         opt['feat_grid_z']              = 32
-        opt['local_queries_per_iter']   = 4096
+        opt['local_queries_per_iter']   = 100000
         opt['min_queries_per_block']    = 16
         opt['max_blocks_per_iter']      = 100
         opt['num_positional_encoding_terms'] = 6

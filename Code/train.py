@@ -222,7 +222,7 @@ class Trainer():
 
                 if(rank == 0):
                     print("Total parameter count: %i" % model.count_parameters())   
-                with torch.no_grad():                                    
+                with torch.no_grad():                          
                     sample_points = make_coord(item.shape[2:], self.opt['device'], 
                         flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()       
                     reconstructed = model.forward_global_positions(sample_points)    
@@ -260,7 +260,10 @@ class Trainer():
             print("Saved model")
 
     def log_with_image(self, model, item, block_error_sum, writer, step):
-        with torch.no_grad():    
+        with torch.no_grad():  
+            if(self.opt['use_residual']):
+                temp_residual = model.residual
+                model.residual = None  
             sample_points = make_coord(item.shape[2:], self.opt['device'], 
                 flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()            
             reconstructed = model.forward_global_positions(sample_points)    
@@ -280,7 +283,8 @@ class Trainer():
                     ((reconstructed-res)[0]+0.5).clamp_(0, 1), step)
             writer.add_image("reconstruction", reconstructed[0].clamp_(0, 1), step)
             writer.add_image("reconstruction_blocks", reconstructed[0].clamp_(0, 1)*octree_blocks[0], step)
-
+            if(self.opt['use_residual']):
+                model.residual = temp_residual
 
 
 if __name__ == '__main__':
