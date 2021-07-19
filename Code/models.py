@@ -450,11 +450,13 @@ class HierarchicalACORN(nn.Module):
         return index_to_global_positions_indices
     
     
-    @profile
+    #@profile
     def forward_global_positions(self, global_positions, index_to_global_positions_indices=None, 
     depth_start=None, depth_end=None, local_positions=None, block_start=None):
         if depth_start is None:
             depth_start = self.opt['octree_depth_start']
+        if self.opt['use_residual']:
+            depth_start = self.octree.max_depth()
         if depth_end is None:
             depth_end = self.octree.max_depth()+1
             
@@ -469,8 +471,10 @@ class HierarchicalACORN(nn.Module):
             out_shape = [global_positions.shape[0], self.opt['num_channels'], 1, 1, global_positions.shape[-2]]
         
         out = torch.zeros(out_shape, device=self.opt['device'])
+        if(self.opt['use_residual'] and self.residual is not None):
+            out += F.grid_sample(self.residual, 
+                    global_positions, mode='bilinear', align_corners=False).detach()
 
-        global_to_local_time = 0
 
         start_time = time.time()
         for depth in range(depth_start, depth_end):
@@ -487,19 +491,17 @@ class HierarchicalACORN(nn.Module):
             self.models[model_no].feat_grid_shape[0] = feat_grids.shape[0]
             feat_grids = feat_grids.reshape(self.models[model_no].feat_grid_shape)
             
-            local_positions_at_depth = self.octree.global_to_local_batch(
-                global_positions, depth)
-            
             if(depth == depth_end-1 and local_positions is not None):
                 feat = F.grid_sample(feat_grids[block_start:block_start+local_positions.shape[0]], 
                     local_positions, mode='bilinear', align_corners=False)
                 feat = self.models[model_no].vol2FC(feat)
                 out_temp = self.models[model_no].feature_decoder(feat)
                 out_temp = out_temp.flatten(0, -2).unsqueeze(0).unsqueeze(0)
-                out_temp = self.models[model_no].FC2vol(out_temp)
-                
+                out_temp = self.models[model_no].FC2vol(out_temp)                
                 out += out_temp
             else:  
+                local_positions_at_depth = self.octree.global_to_local_batch(
+                    global_positions, depth)
                 for i in range(len(blocks)):
                     local_positions_in_block = local_positions_at_depth[...,index_to_global_positions_indices[blocks[i].index],:]
                     if(local_positions_in_block.shape[-2] > 0):

@@ -23,6 +23,7 @@ class Options():
         opt['num_positional_encoding_terms'] = 6
         opt['FC_size_exp_start']        = 3
         opt['FC_size_exp_grow']        = 0.5
+        opt['use_residual']            = True
 
         opt["octree_depth_start"]      = 0
         opt["octree_depth_end"]        = 6

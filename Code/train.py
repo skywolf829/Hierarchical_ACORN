@@ -187,6 +187,8 @@ class Trainer():
                     
                     if(block_error_sum > best_MSE and best_MSE_epoch < epoch - 100):
                         early_stop = True
+                        if(rank == 0):
+                            print("Stopping early")
                     else:
                         best_MSE = block_error_sum
                         best_MSE_epoch = epoch
@@ -225,7 +227,8 @@ class Trainer():
                         flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()       
                     reconstructed = model.forward_global_positions(sample_points)    
                     reconstructed = reconstructed.reshape(item.shape)
-
+                    if(self.opt['use_residual']):
+                        model.residual = reconstructed.detach()
                 model = model.to(self.opt['device'])
                 model.pe = PositionalEncoding(self.opt)
 
@@ -300,6 +303,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_positional_encoding_terms',default=None,type=int,help='Number of positional encoding terms')
     parser.add_argument('--FC_size_exp_start',default=None,type=float,help='How large the FC layers start')
     parser.add_argument('--FC_size_exp_grow',default=None,type=float,help='How much the FC layers grow deeper in the octree')
+    parser.add_argument('--use_residual',default=None,type=str2bool,help='Use a cached residual to accelerate training')
     
     parser.add_argument('--octree_depth_start',default=None,type=int,help='How deep to start the octree, inclusive')    
     parser.add_argument('--octree_depth_end',default=None,type=int,help='How deep to end the octree, exclusive')
