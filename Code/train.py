@@ -1,7 +1,7 @@
 from math import log10
 
 from numpy.core.shape_base import block
-from utility_functions import PSNR, make_coord, str2bool, ssim, PSNRfromMSE
+from utility_functions import PSNR, local_to_global, make_coord, str2bool, ssim, PSNRfromMSE
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
@@ -29,11 +29,11 @@ class Trainer():
         self.opt = opt
         torch.manual_seed(0b10101010101010101010101010101010)
 
-    #@profile
+    @profile
     def train(self, rank, model, item):
         torch.manual_seed(0)
-        rank = rank + self.opt['gpus_per_node']*self.opt['node_num']
         if(self.opt['train_distributed']):
+            rank = rank + self.opt['gpus_per_node']*self.opt['node_num']
             self.opt['device'] = "cuda:" + str(rank)
             model.opt = self.opt
             dist.init_process_group(                                   
@@ -62,7 +62,7 @@ class Trainer():
         #    3*self.opt['epochs']/5, 
         #    4*self.opt['epochs']/5],gamma=self.opt['gamma'])
 
-        if(rank == 0):
+        if(rank == 0 or not self.opt['train_distributed']):
             writer = SummaryWriter(os.path.join('tensorboard',self.opt['save_name']))
         start_time = time.time()
 
@@ -83,7 +83,7 @@ class Trainer():
             model_optim = optim.Adam(model.models[model_num].parameters(), lr=self.opt["lr"], 
                 betas=(self.opt["beta_1"],self.opt["beta_2"]))
 
-            if(rank == 0):
+            if(rank == 0 or not self.opt['train_distributed']):
                 print("Model %i, total parameter count: %i" % (model_num, model.count_parameters()))
             blocks, block_positions = model.octree.depth_to_blocks_and_block_positions(
                         model.octree.max_depth())
@@ -105,7 +105,7 @@ class Trainer():
             model_caches = {}
             
             block_error_sum = torch.tensor(0, dtype=torch.float32, device=self.opt['device']) 
-            if(rank < len(blocks)):
+            if(rank < len(blocks) or not self.opt['train_distributed']):
                 best_MSE = 1.0
                 best_MSE_epoch = 0
                 early_stop = False
@@ -117,7 +117,7 @@ class Trainer():
                     block_error_sum = torch.tensor(0, dtype=torch.float32, device=self.opt['device'])
                     b = rank * int(len(blocks)/stride)
                     b_stop = min((rank+1) * int(len(blocks)/stride), len(blocks))
-                    if(rank == 0 and epoch == 0):
+                    if((rank == 0 or not self.opt['train_distributed']) and epoch == 0):
                         writer.add_scalar("num_nodes", len(blocks), model_num)
                     queries = max(int(self.opt['local_queries_per_iter'] / len(blocks)),
                         self.opt['min_queries_per_block'])
@@ -146,16 +146,7 @@ class Trainer():
                             shapes = torch.tensor([block.shape for block in blocks[b:b+blocks_this_iter]], device=self.opt['device']).unsqueeze(1).unsqueeze(1)
                             poses = torch.tensor([block.pos for block in blocks[b:b+blocks_this_iter]], device=self.opt['device']).unsqueeze(1).unsqueeze(1)
                             
-                            global_positions = (local_positions.clone() + 1) / 2
-                            global_positions[...,0] *= (shapes[...,2]/item.shape[2])
-                            global_positions[...,0] += (poses[...,0]/item.shape[2])
-                            global_positions[...,0] *= 2
-                            global_positions[...,0] -= 1
-                            
-                            global_positions[...,1] *= (shapes[...,3]/item.shape[3])
-                            global_positions[...,1] += (poses[...,1]/item.shape[3])
-                            global_positions[...,1] *= 2
-                            global_positions[...,1] -= 1
+                            global_positions = local_to_global(local_positions.clone(), shapes, poses, item.shape)                            
                             global_positions = global_positions.flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()
                             
                             if((b, blocks_this_iter) not in model_caches.keys()):
@@ -164,7 +155,8 @@ class Trainer():
                             block_output = model.forward_global_positions(global_positions, 
                                 index_to_global_positions_indices=model_caches[(b, blocks_this_iter)],
                                 local_positions=local_positions, block_start=b)
-                            block_item = F.grid_sample(item.expand([-1, -1, -1, -1]), global_positions.flip(-1), mode='bilinear', align_corners=False)
+                            block_item = F.grid_sample(item.expand([-1, -1, -1, -1]), 
+                                global_positions.flip(-1), mode='bilinear', align_corners=False)
                             #print("block_item shape: " + str(block_item.shape))
                         
                         block_error = loss(block_output,block_item) * (blocks_this_iter/len(blocks))
@@ -188,7 +180,7 @@ class Trainer():
                     
                     if(block_error_sum > best_MSE and best_MSE_epoch < epoch - 100):
                         early_stop = True
-                        if(rank == 0):
+                        if(rank == 0 or not self.opt['train_distributed']):
                             print("Stopping early")
                     else:
                         best_MSE = block_error_sum
@@ -211,37 +203,33 @@ class Trainer():
                     epoch += 1
             
             if(self.opt['train_distributed']):
-                print("Rank " + str(rank) + " waiting at barrier")
                 barrier()  
                 # Synchronize all models, whether they were training or not
                 for param in model.models[model_num].parameters():
                     broadcast(param, 0)
 
-            if(rank == 0 and self.opt['log_img']):
+            if((rank == 0 or not self.opt['train_distributed']) and self.opt['log_img']):
                 self.log_with_image(model, item, block_error_sum, writer, step)
 
 
             if(model_num < self.opt['octree_depth_end'] - self.opt['octree_depth_start']-1):
 
-                if(rank == 0):
-                    print("Total parameter count: %i" % model.count_parameters())   
-                with torch.no_grad():                          
-                    sample_points = make_coord(item.shape[2:], self.opt['device'], 
-                        flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()       
-                    reconstructed = model.forward_global_positions(sample_points)    
-                    reconstructed = reconstructed.reshape(item.shape)
-                    if(self.opt['use_residual']):
-                        model.residual = reconstructed.detach()
                 model = model.to(self.opt['device'])
                 model.pe = PositionalEncoding(self.opt)
 
-                if(rank == 0):
-                    print("Last error: " + str(block_error_sum.item()))
-
-                if(self.opt['error_bound_split']):
-                    model.octree.split_from_error_max_depth(reconstructed, item, loss, MSE_limit)
-                else:
+                if(self.opt['use_residual'] or self.opt['error_bound_split']):
+                    with torch.no_grad():                          
+                        sample_points = make_coord(item.shape[2:], self.opt['device'], 
+                            flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()       
+                        reconstructed = model.forward_global_positions(sample_points)    
+                        reconstructed = reconstructed.reshape(item.shape)
+                        if(self.opt['use_residual']):
+                            model.residual = reconstructed.detach()
+                        if(self.opt['error_bound_split']):
+                            model.octree.split_from_error_max_depth(reconstructed, item, loss, MSE_limit)
+                elif(not self.opt['error_bound_split']):
                     model.octree.split_all_at_depth(model.octree.max_depth())
+
 
                 #optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=model_optim,
                 #    milestones=[self.opt['epochs']/5, 
@@ -254,7 +242,7 @@ class Trainer():
 
             
 
-        if(rank == 0):
+        if(rank == 0 or not self.opt['train_distributed']):
             print("Total parameter count: %i" % model.count_parameters())   
             end_time = time.time()
             total_time = end_time - start_time
