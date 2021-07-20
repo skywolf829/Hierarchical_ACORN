@@ -133,7 +133,6 @@ dmypy.json
 /Other
 /Output
 /tensorboard
-/SavedModels
 /tensorboard_ACORN
 /TestingData
 .vscode/settings.json
