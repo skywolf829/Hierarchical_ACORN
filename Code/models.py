@@ -435,7 +435,7 @@ class HierarchicalACORN(nn.Module):
         return out
 
     def block_index_to_global_indices_mapping(self, global_positions):
-        print(global_positions.shape)
+        #print(global_positions.shape)
         index_to_global_positions_indices = {}
         for depth in range(self.octree.min_depth(), self.octree.max_depth()+1):
             for block in self.octree.depth_to_nodes[depth].values():
@@ -445,7 +445,7 @@ class HierarchicalACORN(nn.Module):
                 for i in range(1, global_positions.shape[-1]):                    
                     mask = torch.logical_and(mask,global_positions[0,0,...,i] >= block_bbox[i*2])
                     mask = torch.logical_and(mask,global_positions[0,0,...,i] <  block_bbox[i*2+1])
-                index_to_global_positions_indices[block.index] = mask
+                index_to_global_positions_indices[block.index] = mask.nonzero()[:,0]
 
         return index_to_global_positions_indices
     
@@ -502,13 +502,35 @@ class HierarchicalACORN(nn.Module):
             else:  
                 local_positions_at_depth = self.octree.global_to_local_batch(
                     global_positions, depth)
-                for i in range(len(blocks)):
-                    local_positions_in_block = local_positions_at_depth[...,index_to_global_positions_indices[blocks[i].index],:]
-                    if(local_positions_in_block.shape[-2] > 0):
-                        feat = F.grid_sample(feat_grids[i:i+1], local_positions_in_block, mode='bilinear', align_corners=False)
-                        feat = self.models[model_no].vol2FC(feat)
-                        out[...,index_to_global_positions_indices[blocks[i].index]] += self.models[model_no].FC2vol(self.models[model_no].feature_decoder(feat))
                 
+                for i in range(len(blocks)):
+                    max_num_points = 1024**2 * 4
+                    b_start = 0
+                    while(b_start < index_to_global_positions_indices[blocks[i].index].shape[0]):
+                        b_end = min(b_start + max_num_points, 
+                            index_to_global_positions_indices[blocks[i].index].shape[0])
+                        #print("After while")
+                        #print(index_to_global_positions_indices[blocks[i].index][b_start:b_end].shape)
+                        #local_positions_in_block = local_positions_at_depth[...,b_start:b_end,:][...,
+                        #    index_to_global_positions_indices[blocks[i].index][b_start:b_end],
+                        #    :]
+                        local_positions_in_block = local_positions_at_depth[...,
+                            index_to_global_positions_indices[blocks[i].index][b_start:b_end],:]
+                        if(local_positions_in_block.shape[-2] > 0):   
+                            feat = F.grid_sample(feat_grids[i:i+1], 
+                                local_positions_in_block, 
+                                mode='bilinear', align_corners=False)
+                            feat = self.models[model_no].vol2FC(feat)
+                            feat = self.models[model_no].feature_decoder(feat)
+                            feat = self.models[model_no].FC2vol(feat)
+                            #print("feat")
+                            #print(feat.shape)
+                            #print("out")
+                            #print(out[...,b_start:b_end][...,index_to_global_positions_indices[blocks[i].index][b_start:b_end]].shape)
+                            #out[...,b_start:b_end][...,index_to_global_positions_indices[blocks[i].index][b_start:b_end]] += feat
+                            out[...,index_to_global_positions_indices[blocks[i].index][b_start:b_end]] += feat                            
+                            
+                        b_start = b_end
             #print("Model at depth %i took %f seconds" % (depth, time.time()-model_start_time))
         
         #print("Feedforward for %i points took %f seconds" % (global_positions.shape[-2], time.time()-start_time))

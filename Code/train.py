@@ -29,6 +29,7 @@ class Trainer():
         self.opt = opt
         torch.manual_seed(0b10101010101010101010101010101010)
 
+    #@profile
     def train(self, rank, model, item):
         torch.manual_seed(0)
         rank = rank + self.opt['gpus_per_node']*self.opt['node_num']
@@ -193,7 +194,9 @@ class Trainer():
                         best_MSE = block_error_sum
                         best_MSE_epoch = epoch
 
-                    if(step % self.opt['log_every'] == 0 and (not self.opt['train_distributed'] or rank == 0)):
+                    if(step % self.opt['log_every'] == 0 and 
+                        (not self.opt['train_distributed'] or rank == 0)
+                        and self.opt['log_img']):
                         self.log_with_image(model, item, block_error_sum, writer, step)
 
                     elif(step % 5 == 0 and (not self.opt['train_distributed'] or rank == 0)):
@@ -214,7 +217,7 @@ class Trainer():
                 for param in model.models[model_num].parameters():
                     broadcast(param, 0)
 
-            if(rank == 0):
+            if(rank == 0 and self.opt['log_img']):
                 self.log_with_image(model, item, block_error_sum, writer, step)
 
 
@@ -259,30 +262,44 @@ class Trainer():
             save_model(model, self.opt)
             print("Saved model")
 
-    def log_with_image(self, model, item, block_error_sum, writer, step):
+    #@profile
+    def log_with_image(self, model, item, block_error_sum, writer, step, img_size = [512, 512]):
         with torch.no_grad():  
             if(self.opt['use_residual']):
                 temp_residual = model.residual
                 model.residual = None  
-            sample_points = make_coord(item.shape[2:], self.opt['device'], 
+            sample_points = make_coord(img_size, self.opt['device'], 
                 flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()            
-            reconstructed = model.forward_global_positions(sample_points)    
-            reconstructed = reconstructed.reshape(item.shape)
-            octree_blocks = model.octree.get_octree_block_img(self.opt['device'])   
-            psnr = PSNR(reconstructed, item, torch.tensor(1.0))
-            s = ssim(reconstructed, item)
-            print("Iteration %i, MSE: %0.06f, PSNR (dB): %0.02f, SSIM: %0.03f" % \
-                (step, block_error_sum.item(), psnr.item(), s.item()))
-            writer.add_scalar('Training PSNR', PSNRfromMSE(block_error_sum, torch.tensor(1.0, device=self.opt['device'])), step)
-            writer.add_scalar('PSNR', psnr.item(), step)
-            writer.add_scalar('SSIM', s.item(), step)         
+            reconstructed = model.forward_global_positions(sample_points).detach()
+            
+            reconstructed = reconstructed.reshape(item.shape[0:2] + tuple(img_size))     
+
             if(len(model.models) > 1):
                 res = model.forward_global_positions(sample_points, depth_end=model.octree.max_depth())    
-                res = res.reshape(item.shape)
+                res = res.reshape(item.shape[0:2] + tuple(img_size))
                 writer.add_image("Network"+str(len(model.models)-1)+"residual", 
-                    ((reconstructed-res)[0]+0.5).clamp_(0, 1), step)
-            writer.add_image("reconstruction", reconstructed[0].clamp_(0, 1), step)
-            writer.add_image("reconstruction_blocks", reconstructed[0].clamp_(0, 1)*octree_blocks[0], step)
+                    ((reconstructed-res)[0]+0.5).clamp(0, 1), step)
+            writer.add_image("reconstruction", reconstructed[0].clamp(0, 1), step)
+            octree_blocks = F.interpolate(model.octree.get_octree_block_img(self.opt['device']),
+                size=img_size, mode="bilinear", align_corners=False)
+            writer.add_image("reconstruction_blocks", reconstructed[0].clamp(0, 1)*octree_blocks[0], step)
+
+            if(self.opt['log_psnr']):
+                psnr = PSNR(reconstructed, F.interpolate(item, size=img_size, mode='bilinear', align_corners=False), 
+                    torch.tensor(1.0)).item()
+            else:
+                psnr = 0            
+            if(self.opt['log_ssim']):
+                s = ssim(reconstructed, F.interpolate(item, size=img_size, mode='bilinear', align_corners=False)).item()
+            else:
+                s = 0
+
+            print("Iteration %i, MSE: %0.06f, PSNR (dB): %0.02f, SSIM: %0.03f" % \
+                (step, block_error_sum.item(), psnr, s))
+            writer.add_scalar('Training PSNR', PSNRfromMSE(block_error_sum, torch.tensor(1.0, device=self.opt['device'])), step)
+            writer.add_scalar('PSNR', psnr, step)
+            writer.add_scalar('SSIM', s, step)         
+            
             if(self.opt['use_residual']):
                 model.residual = temp_residual
 
@@ -327,6 +344,8 @@ if __name__ == '__main__':
     parser.add_argument('--load_from',default=None, type=str,help='Load a model to continue training')
     parser.add_argument('--save_every',default=None, type=int,help='How often to save during training')
     parser.add_argument('--log_every',default=None, type=int,help='How often to log during training')
+    parser.add_argument('--log_img',default=None, type=str2bool,help='Log img during training')
+    parser.add_argument('--log_ssim',default=None, type=str2bool,help='Log ssim during training')
 
     args = vars(parser.parse_args())
 
