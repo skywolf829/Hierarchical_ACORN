@@ -445,7 +445,7 @@ class HierarchicalACORN(nn.Module):
                 for i in range(1, global_positions.shape[-1]):                    
                     mask = torch.logical_and(mask,global_positions[0,0,...,i] >= block_bbox[i*2])
                     mask = torch.logical_and(mask,global_positions[0,0,...,i] <  block_bbox[i*2+1])
-                index_to_global_positions_indices[block.index] = mask.nonzero()[:,0]
+                index_to_global_positions_indices[block.index] = torch.nonzero(mask, as_tuple=False)[:,0]
 
         return index_to_global_positions_indices
     

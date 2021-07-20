@@ -1,6 +1,8 @@
 import torch
 from typing import List, Tuple
 import os
+from utility_functions import make_coord, local_to_global
+import torch.nn.functional as F
 
 file_folder_path = os.path.dirname(os.path.abspath(__file__))
 project_folder_path = os.path.join(file_folder_path, "..")
@@ -157,6 +159,39 @@ class OctreeNodeList:
             split_nodes = block.split()
             for b in split_nodes:
                 if error_func(b.data(reconstructed), b.data(item)) > max_error:
+                    b.parent = block
+                    block.children.append(b)
+                    self.append(b)
+    
+    def split_from_error_max_depth_blockwise(self, model, item, error_func, max_error, opt):
+        max_depth = self.max_depth()
+
+        coord_shape = [int(opt['feat_grid_x']/2), int(opt['feat_grid_y']/2)]
+        if(opt['mode'] != '2D'):
+            coord_shape.append(int(opt['feat_grid_z']))
+
+        for block in self.depth_to_nodes[max_depth].values():
+            split_nodes = block.split()
+            for b in split_nodes:           
+                shapes = torch.tensor([b.shape], device=opt['device']).unsqueeze(1).unsqueeze(1)
+                poses = torch.tensor([b.pos], device=opt['device']).unsqueeze(1).unsqueeze(1)
+                
+                sample_points = make_coord(coord_shape, opt['device'],
+                    flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()
+                     
+                sample_points = local_to_global(sample_points, 
+                    shapes, poses,
+                    item.shape
+                    ) 
+                block_reconstruction = model.forward_global_positions(sample_points)
+                item_points = F.grid_sample(
+                    item.expand([-1, -1, -1, -1]) if opt['mode'] == '2D' else item.expand([-1, -1, -1, -1, -1]), 
+                    sample_points.flip(-1), 
+                    mode='bilinear' if opt['mode'] == '2D' else 'trilinear', 
+                    align_corners=False)
+                    
+                b_err = error_func(block_reconstruction, item_points)
+                if b_err > max_error:
                     b.parent = block
                     block.children.append(b)
                     self.append(b)

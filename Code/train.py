@@ -79,16 +79,21 @@ class Trainer():
         for model_num in range(self.opt['octree_depth_end'] - self.opt['octree_depth_start']):
             if(self.opt['train_distributed']):
                 barrier()
+            for m_num in range(self.opt['octree_depth_end'] - self.opt['octree_depth_start']):
+                for param in model.models[m_num].parameters():
+                    param.requires_grad = model_num == m_num
 
             model_optim = optim.Adam(model.models[model_num].parameters(), lr=self.opt["lr"], 
                 betas=(self.opt["beta_1"],self.opt["beta_2"]))
 
-            if(rank == 0 or not self.opt['train_distributed']):
-                print("Model %i, total parameter count: %i" % (model_num, model.count_parameters()))
             blocks, block_positions = model.octree.depth_to_blocks_and_block_positions(
                         model.octree.max_depth())
             block_positions = torch.tensor(block_positions, 
                     device=self.opt['device'])
+                    
+            if(rank == 0 or not self.opt['train_distributed']):
+                print("Model %i, total parameter count: %i, num blocks: %i" % 
+                    (model_num, model.count_parameters(), len(blocks)))
             if(self.opt['train_distributed']):
                 num_blocks = len(blocks)
                 print("Blocks: " + str(num_blocks))
@@ -160,7 +165,6 @@ class Trainer():
                             #print("block_item shape: " + str(block_item.shape))
                         
                         block_error = loss(block_output,block_item) * (blocks_this_iter/len(blocks))
-                        blocks[b].last_loss = block_error.detach().item() 
                         block_error.backward(retain_graph=True)
                         block_error_sum += block_error.detach()
 
@@ -211,22 +215,25 @@ class Trainer():
             if((rank == 0 or not self.opt['train_distributed']) and self.opt['log_img']):
                 self.log_with_image(model, item, block_error_sum, writer, step)
 
-
             if(model_num < self.opt['octree_depth_end'] - self.opt['octree_depth_start']-1):
 
                 model = model.to(self.opt['device'])
                 model.pe = PositionalEncoding(self.opt)
 
-                if(self.opt['use_residual'] or self.opt['error_bound_split']):
-                    with torch.no_grad():                          
+                if(self.opt['use_residual']):
+                    with torch.no_grad():   
                         sample_points = make_coord(item.shape[2:], self.opt['device'], 
-                            flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()       
+                                flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()       
                         reconstructed = model.forward_global_positions(sample_points)    
-                        reconstructed = reconstructed.reshape(item.shape)
-                        if(self.opt['use_residual']):
-                            model.residual = reconstructed.detach()
-                        if(self.opt['error_bound_split']):
-                            model.octree.split_from_error_max_depth(reconstructed, item, loss, MSE_limit)
+                        reconstructed = reconstructed.reshape(item.shape) 
+                        model.residual = reconstructed.detach()  
+                        model.octree.split_from_error_max_depth(reconstructed, item, loss, MSE_limit)    
+                        del reconstructed
+
+                elif(self.opt['error_bound_split']):
+                    with torch.no_grad(): 
+                        model.octree.split_from_error_max_depth_blockwise(model, item, loss, MSE_limit, self.opt)
+                            
                 elif(not self.opt['error_bound_split']):
                     model.octree.split_all_at_depth(model.octree.max_depth())
 
@@ -236,11 +243,7 @@ class Trainer():
                 #    2*self.opt['epochs']/5, 
                 #    3*self.opt['epochs']/5, 
                 #    4*self.opt['epochs']/5],gamma=self.opt['gamma'])
-                for param in model.models[model_num].parameters():
-                    param.requires_grad = False
                 self.opt['epoch'] = 0
-
-            
 
         if(rank == 0 or not self.opt['train_distributed']):
             print("Total parameter count: %i" % model.count_parameters())   
