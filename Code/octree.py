@@ -168,7 +168,7 @@ class OctreeNodeList:
 
         coord_shape = [int(opt['feat_grid_x']/2), int(opt['feat_grid_y']/2)]
         if(opt['mode'] != '2D'):
-            coord_shape.append(int(opt['feat_grid_z']))
+            coord_shape.append(int(opt['feat_grid_z']/2))
 
         for block in self.depth_to_nodes[max_depth].values():
             split_nodes = block.split()
