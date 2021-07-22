@@ -198,6 +198,7 @@ class Trainer():
                         print("Iteration %i, L1: %0.06f" % \
                                 (epoch, block_error_sum.item()))
                         writer.add_scalar('Training PSNR', PSNRfromL1(block_error_sum, torch.tensor(1.0, device=self.opt['device'])), step)
+                        writer.add_scalar('L1', block_error_sum, step)
                     step += 1
                 
                     if(epoch % self.opt['save_every'] == 0 and (not self.opt['train_distributed'] or rank == 0)):
