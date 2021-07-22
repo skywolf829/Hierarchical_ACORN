@@ -44,7 +44,8 @@ class Trainer():
             model.opt = self.opt
             dist.init_process_group(                                   
                 backend='nccl',                                         
-                init_method='env://',                                   
+                #init_method='env://',                                 
+                init_method='file://'+os.getcwd()+"/DistTemp",                                    
                 world_size = self.opt['num_nodes'] * self.opt['gpus_per_node'],                              
                 rank=rank                                               
             )
