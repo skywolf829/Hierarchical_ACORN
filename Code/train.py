@@ -227,12 +227,14 @@ class Trainer():
                         reconstructed = model.forward_global_positions(sample_points)    
                         reconstructed = reconstructed.reshape(item.shape) 
                         model.residual = reconstructed.detach()  
-                        model.octree.split_from_error_max_depth(reconstructed, item, loss, MSE_limit)    
+                        model.octree.split_from_error_max_depth(reconstructed, item, 
+                            nn.MSELoss().to(self.opt["device"]), MSE_limit)    
                         del reconstructed
 
                 elif(self.opt['error_bound_split']):
                     with torch.no_grad(): 
-                        model.octree.split_from_error_max_depth_blockwise(model, item, loss, MSE_limit, self.opt)
+                        model.octree.split_from_error_max_depth_blockwise(model, item, nn.MSELoss().to(self.opt["device"]), 
+                            MSE_limit, self.opt)
                             
                 elif(not self.opt['error_bound_split']):
                     model.octree.split_all_at_depth(model.octree.max_depth())
