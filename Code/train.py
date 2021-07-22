@@ -23,16 +23,22 @@ from torch.utils.checkpoint import checkpoint_sequential, checkpoint
 from torch.multiprocessing import spawn
 from torch.distributed import new_group, barrier, group, broadcast
 import h5py
+import socket
 
 class Trainer():
     def __init__(self, opt):
         self.opt = opt
-        torch.manual_seed(0b10101010101010101010101010101010)
 
     #@profile
     def train(self, rank, model, item):
-        torch.manual_seed(0)
+        torch.manual_seed(0b10101010101010101010101010101010)
         if(self.opt['train_distributed']):
+            node_name = socket.gethostname()
+            with open(os.environ['COBALT_NODEFILE'], 'r') as file:
+                nodes = file.read().replace('\n', ',')
+            nodes = nodes[:len(nodes)-1]
+            nodes = nodes.split(',')
+            self.opt['node_num'] = nodes.index(node_name)
             rank = rank + self.opt['gpus_per_node']*self.opt['node_num']
             self.opt['device'] = "cuda:" + str(rank)
             model.opt = self.opt
