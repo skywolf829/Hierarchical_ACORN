@@ -176,7 +176,7 @@ class Trainer():
                     else:
                         for param in model.models[model_num].parameters():
                             param.grad.data *= (1/total_queries)
-
+                    block_error_sum /= total_queries
                     model_optim.step()
                     #optim_scheduler.step()
                     
