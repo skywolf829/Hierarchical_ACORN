@@ -187,6 +187,12 @@ def PSNRfromMSE(mse, max_diff = None):
     p = 20 * torch.log10(max_diff) - 10*torch.log10(mse)
     return p
 
+def PSNRfromL1(l1, max_diff = None):
+    if(max_diff is None):
+        max_diff = torch.tensor([1.0])
+    p = 20 * torch.log10(max_diff) - 10*torch.log10(l1**2)
+    return p
+
 def relative_error(x, GT, max_diff = None):
     if(max_diff is None):
         max_diff = GT.max() - GT.min()

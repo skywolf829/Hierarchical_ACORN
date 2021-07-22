@@ -1,7 +1,7 @@
 from math import log10
 
 from numpy.core.shape_base import block
-from utility_functions import PSNR, local_to_global, make_coord, str2bool, ssim, PSNRfromMSE
+from utility_functions import PSNR, PSNRfromL1, local_to_global, make_coord, str2bool, ssim, PSNRfromMSE
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
@@ -73,7 +73,7 @@ class Trainer():
             writer = SummaryWriter(os.path.join('tensorboard',self.opt['save_name']))
         start_time = time.time()
 
-        loss = nn.MSELoss().to(self.opt["device"])
+        loss = nn.L1Loss().to(self.opt["device"])
         step = 0
         item = item.to(self.opt['device'])
 
@@ -161,7 +161,7 @@ class Trainer():
                         block_error = loss(block_output,block_item) * queries * blocks_this_iter #* (blocks_this_iter/len(blocks))
                         block_error.backward(retain_graph=True)
                         block_error_sum += block_error.detach()
-                        total_queries += queries * blocks_this_iter
+                        total_queries += (queries * blocks_this_iter)
 
                         b += blocks_this_iter
                         
@@ -195,9 +195,9 @@ class Trainer():
                         self.log_with_image(model, item, block_error_sum, writer, step)
 
                     elif(step % 5 == 0 and (not self.opt['train_distributed'] or rank == 0)):
-                        print("Iteration %i, MSE: %0.06f" % \
+                        print("Iteration %i, L1: %0.06f" % \
                                 (epoch, block_error_sum.item()))
-                        writer.add_scalar('Training PSNR', PSNRfromMSE(block_error_sum, torch.tensor(1.0, device=self.opt['device'])), step)
+                        writer.add_scalar('Training PSNR', PSNRfromL1(block_error_sum, torch.tensor(1.0, device=self.opt['device'])), step)
                     step += 1
                 
                     if(epoch % self.opt['save_every'] == 0 and (not self.opt['train_distributed'] or rank == 0)):
