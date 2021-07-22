@@ -40,7 +40,7 @@ class Trainer():
             nodes = nodes.split(',')
             self.opt['node_num'] = nodes.index(node_name)
             rank = rank + self.opt['gpus_per_node']*self.opt['node_num']
-            self.opt['device'] = "cuda:" + str(rank)
+            self.opt['device'] = "cuda:" + str(rank % self.opt['gpus_per_node'])
             model.opt = self.opt
             dist.init_process_group(                                   
                 backend='nccl',                                         
@@ -176,6 +176,7 @@ class Trainer():
                     else:
                         for param in model.models[model_num].parameters():
                             param.grad.data *= (1/total_queries)
+
                     block_error_sum /= total_queries
                     model_optim.step()
                     #optim_scheduler.step()
