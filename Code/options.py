@@ -44,6 +44,7 @@ class Options():
         opt["epoch"]                   = 0
         opt["save_every"]              = 1000
         opt["log_every"]               = 1000
+        opt['log_loss']                = True
         opt['log_img']                 = True
         opt['log_psnr']                = True
         opt['log_ssim']                = True

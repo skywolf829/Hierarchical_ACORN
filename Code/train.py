@@ -52,7 +52,7 @@ class Trainer():
             model = model.to(self.opt['device'])
             model.pe = PositionalEncoding(self.opt)
             #model = DDP(model, device_ids=[rank])
-            print("Training in parallel, node + " + str(self.opt['node_num']) + " device cuda:" + str(rank))
+            #print("Training in parallel, node " + str(self.opt['node_num']) + " device cuda:" + str(rank))
             # Synchronize all models
             for model_num in range(len(model.models)):
                 for param in model.models[model_num].parameters():
@@ -103,7 +103,8 @@ class Trainer():
                     (model_num, model.count_parameters(), len(blocks)))
             if(self.opt['train_distributed']):
                 num_blocks = len(blocks)
-                print("Blocks: " + str(num_blocks))
+                if(rank == 0):
+                    print("Blocks: " + str(num_blocks))
                 if(num_blocks < 
                     self.opt['num_nodes'] * self.opt['gpus_per_node']):
                     g = new_group(list(range(num_blocks)), backend='nccl')
@@ -133,7 +134,7 @@ class Trainer():
                         writer.add_scalar("num_nodes", len(blocks), model_num)
                     queries = max(int(self.opt['local_queries_per_iter'] / len(blocks)),
                         self.opt['min_queries_per_block'])
-
+                    total_queries = torch.tensor(0, dtype=torch.int, device=self.opt['device'])
                     while b < b_stop:
                         #blocks_this_iter = min(self.opt['max_blocks_per_iter'], b_stop-b)
                         blocks_this_iter = b_stop-b
@@ -142,19 +143,6 @@ class Trainer():
                             local_positions = torch.rand([blocks_this_iter, 1, 
                                 queries, 2], device=self.opt['device']) * 2 - 1
                                 
-                            #print("Local positions shape: " + str(local_positions.shape))
-                            '''
-                            feat_grids = model.models[-1].feature_encoder(pe(block_positions[b:b+blocks_this_iter]))
-                            model.models[-1].feat_grid_shape[0] = feat_grids.shape[0]
-                            feat_grids = feat_grids.reshape(model.models[-1].feat_grid_shape)
-                            feats = F.grid_sample(feat_grids[b:b+blocks_this_iter], local_positions, mode="bilinear", align_corners=False)
-                            feats = feats.permute(0, 2, 3, 1)
-                            block_output = model.models[-1].feature_decoder(feats)                       
-                            res = F.grid_sample(model.residual.expand([blocks_this_iter, -1, -1, -1]), global_positions, mode="bilinear", align_corners=False)
-                            block_output = block_output.permute(0, 3, 1, 2) + res
-                            '''
-                            #block_output = model(blocks, block_positions, local_positions)
-                            #print("block_output shape: " + str(block_output.shape))
                             shapes = torch.tensor([block.shape for block in blocks[b:b+blocks_this_iter]], device=self.opt['device']).unsqueeze(1).unsqueeze(1)
                             poses = torch.tensor([block.pos for block in blocks[b:b+blocks_this_iter]], device=self.opt['device']).unsqueeze(1).unsqueeze(1)
                             
@@ -169,23 +157,26 @@ class Trainer():
                                 local_positions=local_positions, block_start=b)
                             block_item = F.grid_sample(item.expand([-1, -1, -1, -1]), 
                                 global_positions.flip(-1), mode='bilinear', align_corners=False)
-                            #print("block_item shape: " + str(block_item.shape))
                         
-                        block_error = loss(block_output,block_item) * (blocks_this_iter/len(blocks))
+                        block_error = loss(block_output,block_item) * queries * blocks_this_iter #* (blocks_this_iter/len(blocks))
                         block_error.backward(retain_graph=True)
                         block_error_sum += block_error.detach()
+                        total_queries += queries * blocks_this_iter
 
                         b += blocks_this_iter
                         
 
                     if self.opt['train_distributed']:
                         # Grad averaging for dist training
-                        size = float(dist.get_world_size(g))
+                        dist.all_reduce(block_error_sum, op=dist.ReduceOp.SUM, group=g)
+                        dist.all_reduce(total_queries, op=dist.ReduceOp.SUM, group=g)
                         for param in model.models[model_num].parameters():
                             dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM, group=g)
-                            #param.grad.data /= size
-                        dist.all_reduce(block_error_sum, op=dist.ReduceOp.SUM, group=g)
-                    
+                            param.grad.data *= (1/total_queries)
+                    else:
+                        for param in model.models[model_num].parameters():
+                            param.grad.data *= (1/total_queries)
+
                     model_optim.step()
                     #optim_scheduler.step()
                     
