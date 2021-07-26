@@ -157,6 +157,24 @@ class Trainer():
                                 local_positions=local_positions, block_start=b)
                             block_item = F.grid_sample(item.expand([-1, -1, -1, -1]), 
                                 global_positions.flip(-1), mode='bilinear', align_corners=False)
+                        else:
+                            local_positions = torch.rand([blocks_this_iter, 1, 1,
+                                queries, 3], device=self.opt['device']) * 2 - 1
+                                
+                            shapes = torch.tensor([block.shape for block in blocks[b:b+blocks_this_iter]], device=self.opt['device']).unsqueeze(1).unsqueeze(1)
+                            poses = torch.tensor([block.pos for block in blocks[b:b+blocks_this_iter]], device=self.opt['device']).unsqueeze(1).unsqueeze(1)
+                            
+                            global_positions = local_to_global(local_positions.clone(), shapes, poses, item.shape)                            
+                            global_positions = global_positions.flatten(0, -2).unsqueeze(0).unsqueeze(0).unsqueeze(0).contiguous()
+                            
+                            if((b, blocks_this_iter) not in model_caches.keys()):
+                                model_caches[(b, blocks_this_iter)] = model.block_index_to_global_indices_mapping(global_positions)
+
+                            block_output = model.forward_global_positions(global_positions, 
+                                index_to_global_positions_indices=model_caches[(b, blocks_this_iter)],
+                                local_positions=local_positions, block_start=b)
+                            block_item = F.grid_sample(item.expand([-1, -1, -1, -1, -1]), 
+                                global_positions.flip(-1), mode='bilinear', align_corners=False)
                         
                         block_error = loss(block_output,block_item) * queries * blocks_this_iter #* (blocks_this_iter/len(blocks))
                         block_error.backward(retain_graph=True)
@@ -223,7 +241,9 @@ class Trainer():
                 if(self.opt['use_residual']):
                     with torch.no_grad():   
                         sample_points = make_coord(item.shape[2:], self.opt['device'], 
-                                flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()       
+                                flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()    
+                        if('3D' in self.opt['mode']):
+                            sample_points = sample_points.unsqueeze(0)   
                         reconstructed = model.forward_global_positions(sample_points)    
                         reconstructed = reconstructed.reshape(item.shape) 
                         model.residual = reconstructed.detach()  
@@ -262,18 +282,26 @@ class Trainer():
                 temp_residual = model.residual
                 model.residual = None  
             sample_points = make_coord(img_size, self.opt['device'], 
-                flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()            
+                flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()     
+            if(self.opt['mode'] == '3D'):
+                sample_points = sample_points.unsqueeze(0)       
             reconstructed = model.forward_global_positions(sample_points).detach()
-            
+            if(self.opt['mode'] == '3D'):
+                reconstructed = reconstructed[...,int(reconstructed.shape[-1]/2)]
             reconstructed = reconstructed.reshape(item.shape[0:2] + tuple(img_size))     
 
             if(len(model.models) > 1):
                 res = model.forward_global_positions(sample_points, depth_end=model.octree.max_depth())    
+                if(self.opt['mode'] == '3D'):
+                    res = res[...,int(res.shape[-1]/2)]
                 res = res.reshape(item.shape[0:2] + tuple(img_size))
                 writer.add_image("Network"+str(len(model.models)-1)+"residual", 
                     ((reconstructed-res)[0]+0.5).clamp(0, 1), step)
             writer.add_image("reconstruction", reconstructed[0].clamp(0, 1), step)
-            octree_blocks = F.interpolate(model.octree.get_octree_block_img(self.opt['device']),
+            octree_blocks = model.octree.get_octree_block_img(self.opt['device'])
+            if(self.opt['mode'] == '3D'):
+                octree_blocks = octree_blocks[...,int(octree_blocks.shape[-1]/2)]
+            octree_blocks = F.interpolate(octree_blocks,
                 size=img_size, mode="bilinear", align_corners=False)
             writer.add_image("reconstruction_blocks", reconstructed[0].clamp(0, 1)*octree_blocks[0], step)
 

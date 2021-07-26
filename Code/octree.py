@@ -125,17 +125,58 @@ class OctreeNodeList:
         color_to_fill = torch.tensor([[0, 0, 0]], dtype=torch.float32, device=device).unsqueeze(2)
         for k in self.depth_to_nodes.keys():
             for block in self.depth_to_nodes[k].values():
-                base[:,:,block.pos[0]:block.pos[0]+block.shape[2],
-                    block.pos[1]] = color_to_fill
+                if(len(self.full_shape) == 4):
+                    base[:,:,block.pos[0]:block.pos[0]+block.shape[2],
+                        block.pos[1]] = color_to_fill
 
-                base[:,:,block.pos[0],
-                    block.pos[1]:block.pos[1]+block.shape[3]] = color_to_fill
+                    base[:,:,block.pos[0],
+                        block.pos[1]:block.pos[1]+block.shape[3]] = color_to_fill
 
-                base[:,:,block.pos[0]:block.pos[0]+block.shape[2],
-                    block.pos[1]+block.shape[3]-1] = color_to_fill
+                    base[:,:,block.pos[0]:block.pos[0]+block.shape[2],
+                        block.pos[1]+block.shape[3]-1] = color_to_fill
 
-                base[:,:,block.pos[0]+block.shape[2]-1,
-                    block.pos[1]:block.pos[1]+block.shape[3]] = color_to_fill
+                    base[:,:,block.pos[0]+block.shape[2]-1,
+                        block.pos[1]:block.pos[1]+block.shape[3]] = color_to_fill
+                else:
+                    base[:,:,block.pos[0]:block.pos[0]+block.shape[2],
+                        block.pos[1],
+                        block.pos[2]] = color_to_fill
+                    base[:,:,block.pos[0],
+                        block.pos[1]:block.pos[1]+block.shape[3],
+                        block.pos[2]] = color_to_fill
+                    base[:,:,block.pos[0]:block.pos[0]+block.shape[2],
+                        block.pos[1]+block.shape[3]-1,
+                        block.pos[2]] = color_to_fill
+                    base[:,:,block.pos[0]+block.shape[2]-1,
+                        block.pos[1]:block.pos[1]+block.shape[3],
+                        block.pos[2]] = color_to_fill
+
+                    base[:,:,block.pos[0]:block.pos[0]+block.shape[2],
+                        block.pos[1],
+                        block.pos[2]+block.shape[4]-1] = color_to_fill
+                    base[:,:,block.pos[0],
+                        block.pos[1]:block.pos[1]+block.shape[3],
+                        block.pos[2]+block.shape[4]-1] = color_to_fill
+                    base[:,:,block.pos[0]:block.pos[0]+block.shape[2],
+                        block.pos[1]+block.shape[3]-1,
+                        block.pos[2]+block.shape[4]-1] = color_to_fill
+                    base[:,:,block.pos[0]+block.shape[2]-1,
+                        block.pos[1]:block.pos[1]+block.shape[3],
+                        block.pos[2]+block.shape[4]-1] = color_to_fill
+
+                    base[:,:,block.pos[0],
+                        block.pos[1],
+                        block.pos[2]:block.pos[2]+block.shape[4]-1] = color_to_fill
+                    base[:,:,block.pos[0]+block.shape[2]-1,
+                        block.pos[1],
+                        block.pos[2]:block.pos[2]+block.shape[4]-1] = color_to_fill
+                    base[:,:,block.pos[0],
+                        block.pos[1]+block.shape[3]-1,
+                        block.pos[2]:block.pos[2]+block.shape[4]-1] = color_to_fill
+                    base[:,:,block.pos[0]+block.shape[2]-1,
+                        block.pos[1]+block.shape[3]-1,
+                        block.pos[2]:block.pos[2]+block.shape[4]-1] = color_to_fill
+
         return base
 
     def split_all_at_depth(self, d):
@@ -148,13 +189,6 @@ class OctreeNodeList:
 
     def split_from_error_max_depth(self, reconstructed, item, error_func, max_error):
         max_depth = self.max_depth()
-        '''
-        for i in range(len(self.depth_to_nodes[max_depth])):
-            if self.depth_to_nodes[max_depth][i].error > max_error:
-                split_nodes = self.depth_to_nodes[max_depth][i].split()
-                for j in range(len(split_nodes)):
-                    self.append(split_nodes[j])
-        '''
         for block in self.depth_to_nodes[max_depth].values():
             split_nodes = block.split()
             for b in split_nodes:
@@ -178,6 +212,8 @@ class OctreeNodeList:
                 
                 sample_points = make_coord(coord_shape, opt['device'],
                     flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()
+                if(len(self.full_shape) > 4):
+                    sample_points = sample_points.unsqueeze(0)
                      
                 sample_points = local_to_global(sample_points, 
                     shapes, poses,
@@ -187,7 +223,7 @@ class OctreeNodeList:
                 item_points = F.grid_sample(
                     item.expand([-1, -1, -1, -1]) if opt['mode'] == '2D' else item.expand([-1, -1, -1, -1, -1]), 
                     sample_points.flip(-1), 
-                    mode='bilinear' if opt['mode'] == '2D' else 'trilinear', 
+                    mode='bilinear', 
                     align_corners=False)
                     
                 b_err = error_func(block_reconstruction, item_points)
@@ -213,24 +249,6 @@ class OctreeNodeList:
         blocks = list(self.depth_to_nodes[depth_level].values())
         block_positions = self.blocks_to_positions(blocks)        
         return blocks, block_positions
-
-    '''
-    def index_to_bounding_box(self, index, depth):
-        bounding_box = []
-        box_pos = self.depth_to_nodes[depth][index].pos
-        box_shape = list(self.depth_to_nodes[depth][index].shape[2:])
-        for i in range(len(box_pos)):
-            dim_start = box_pos[i]
-            dim_end = box_pos[i] + box_shape[i]
-            dim_start *= (2/self.full_shape[2+i])
-            dim_end *= (2/self.full_shape[2+i])
-            dim_start -= 1
-            dim_end -= 1
-            bounding_box.append(dim_start)
-            bounding_box.append(dim_end)
-            
-        return bounding_box
-    '''
 
     def global_to_local(self, global_coords, index, depth):
         local_coords = global_coords.clone()

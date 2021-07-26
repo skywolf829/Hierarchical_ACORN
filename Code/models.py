@@ -448,8 +448,7 @@ class HierarchicalACORN(nn.Module):
                 index_to_global_positions_indices[block.index] = torch.nonzero(mask, as_tuple=False)[:,0]
 
         return index_to_global_positions_indices
-    
-    
+      
     #@profile
     def forward_global_positions(self, global_positions, index_to_global_positions_indices=None, 
     depth_start=None, depth_end=None, local_positions=None, block_start=None):
@@ -497,6 +496,8 @@ class HierarchicalACORN(nn.Module):
                 feat = self.models[model_no].vol2FC(feat)
                 out_temp = self.models[model_no].feature_decoder(feat)
                 out_temp = out_temp.flatten(0, -2).unsqueeze(0).unsqueeze(0)
+                if(self.opt['mode'] == '3D'):
+                    out_temp = out_temp.unsqueeze(0)
                 out_temp = self.models[model_no].FC2vol(out_temp)                
                 out += out_temp
             else:  
@@ -509,11 +510,6 @@ class HierarchicalACORN(nn.Module):
                     while(b_start < index_to_global_positions_indices[blocks[i].index].shape[0]):
                         b_end = min(b_start + max_num_points, 
                             index_to_global_positions_indices[blocks[i].index].shape[0])
-                        #print("After while")
-                        #print(index_to_global_positions_indices[blocks[i].index][b_start:b_end].shape)
-                        #local_positions_in_block = local_positions_at_depth[...,b_start:b_end,:][...,
-                        #    index_to_global_positions_indices[blocks[i].index][b_start:b_end],
-                        #    :]
                         local_positions_in_block = local_positions_at_depth[...,
                             index_to_global_positions_indices[blocks[i].index][b_start:b_end],:]
                         if(local_positions_in_block.shape[-2] > 0):   
@@ -523,11 +519,6 @@ class HierarchicalACORN(nn.Module):
                             feat = self.models[model_no].vol2FC(feat)
                             feat = self.models[model_no].feature_decoder(feat)
                             feat = self.models[model_no].FC2vol(feat)
-                            #print("feat")
-                            #print(feat.shape)
-                            #print("out")
-                            #print(out[...,b_start:b_end][...,index_to_global_positions_indices[blocks[i].index][b_start:b_end]].shape)
-                            #out[...,b_start:b_end][...,index_to_global_positions_indices[blocks[i].index][b_start:b_end]] += feat
                             out[...,index_to_global_positions_indices[blocks[i].index][b_start:b_end]] += feat                            
                             
                         b_start = b_end
