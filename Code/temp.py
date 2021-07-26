@@ -10,15 +10,23 @@ from models import PositionalEncoding
 import torch
 from netCDF4 import Dataset
 import matplotlib.pyplot as plt
+from utility_functions import make_coord
+from torch.linalg import norm
 
-if __name__ == '__main__':
-    file_folder_path = os.path.dirname(os.path.abspath(__file__))
-    project_folder_path = os.path.join(file_folder_path, "..")
+def create_toy_data():
+    f = h5py.File("./3D_toydata.h5", 'w')
+    coords = make_coord([128, 128, 128], "cuda:0", flatten=False)
+    coords = norm(coords, dim=3) * 5
+    coords = coords.unsqueeze(0).cpu().numpy()
+    coords = np.sinc(coords)
 
-    input_folder = os.path.join(project_folder_path, "TrainingData")
-    output_folder = os.path.join(project_folder_path, "Output")
-    save_folder = os.path.join(project_folder_path, "SavedModels")
+    coords -= coords.min()
+    coords *= (1/coords.max())
 
+    f['data'] = coords
+    f.close()
+
+def create_graphs():
     x = [1, 2, 3, 4, 5, 6, 7, 8]
     total_train_time = [9 + 7/60, 
                         7 + 21/60, 
@@ -123,3 +131,15 @@ if __name__ == '__main__':
     plt.legend()
     plt.title("Training time per model")
     plt.show()
+
+if __name__ == '__main__':
+    file_folder_path = os.path.dirname(os.path.abspath(__file__))
+    project_folder_path = os.path.join(file_folder_path, "..")
+
+    input_folder = os.path.join(project_folder_path, "TrainingData")
+    output_folder = os.path.join(project_folder_path, "Output")
+    save_folder = os.path.join(project_folder_path, "SavedModels")
+
+    f = h5py.File("./TrainingData/channel_ts0.h5", 'r')
+    print(f['data'].shape)
+

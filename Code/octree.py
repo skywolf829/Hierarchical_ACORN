@@ -120,11 +120,13 @@ class OctreeNodeList:
                 found = True
         return found
    
-    def get_octree_block_img(self, device="cpu"):
+    def get_octree_block_img(self, n_channels, device="cpu"):
         base = torch.ones(self.full_shape, dtype=torch.float32, device=device)
-        color_to_fill = torch.tensor([[0, 0, 0]], dtype=torch.float32, device=device).unsqueeze(2)
+
+        color_to_fill = torch.tensor([[0]*n_channels], dtype=torch.float32, device=device).unsqueeze(2)
         for k in self.depth_to_nodes.keys():
             for block in self.depth_to_nodes[k].values():
+
                 if(len(self.full_shape) == 4):
                     base[:,:,block.pos[0]:block.pos[0]+block.shape[2],
                         block.pos[1]] = color_to_fill

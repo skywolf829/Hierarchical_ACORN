@@ -1,3 +1,4 @@
+from numpy.core.defchararray import encode
 from octree import OctreeNodeList
 from matplotlib.pyplot import xcorr
 import torch
@@ -435,18 +436,16 @@ class HierarchicalACORN(nn.Module):
         return out
 
     def block_index_to_global_indices_mapping(self, global_positions):
-        #print(global_positions.shape)
         index_to_global_positions_indices = {}
         for depth in range(self.octree.min_depth(), self.octree.max_depth()+1):
             for block in self.octree.depth_to_nodes[depth].values():
                 block_bbox = block.bounding_box
                 mask = global_positions[0,0,...,0] >= block_bbox[0]
                 mask = torch.logical_and(mask,global_positions[0,0,...,0] < block_bbox[1])
-                for i in range(1, global_positions.shape[-1]):                    
+                for i in range(1, global_positions.shape[-1]):    
                     mask = torch.logical_and(mask,global_positions[0,0,...,i] >= block_bbox[i*2])
                     mask = torch.logical_and(mask,global_positions[0,0,...,i] <  block_bbox[i*2+1])
-                index_to_global_positions_indices[block.index] = torch.nonzero(mask, as_tuple=False)[:,0]
-
+                index_to_global_positions_indices[block.index] = torch.nonzero(mask, as_tuple=False)[:,-1]
         return index_to_global_positions_indices
       
     #@profile
@@ -472,7 +471,7 @@ class HierarchicalACORN(nn.Module):
         out = torch.zeros(out_shape, device=self.opt['device'])
         if(self.opt['use_residual'] and self.residual is not None):
             out += F.grid_sample(self.residual, 
-                    global_positions.flip(-1), mode='bilinear', align_corners=False).detach()
+                global_positions.flip(-1), mode='bilinear', align_corners=False).detach()
 
 
         start_time = time.time()
@@ -487,8 +486,10 @@ class HierarchicalACORN(nn.Module):
 
             encoded_positions = self.pe(block_positions)
             feat_grids = self.models[model_no].feature_encoder(encoded_positions)
+
             self.models[model_no].feat_grid_shape[0] = feat_grids.shape[0]
             feat_grids = feat_grids.reshape(self.models[model_no].feat_grid_shape)
+
             
             if(depth == depth_end-1 and local_positions is not None):
                 feat = F.grid_sample(feat_grids[block_start:block_start+local_positions.shape[0]], 
@@ -498,12 +499,12 @@ class HierarchicalACORN(nn.Module):
                 out_temp = out_temp.flatten(0, -2).unsqueeze(0).unsqueeze(0)
                 if(self.opt['mode'] == '3D'):
                     out_temp = out_temp.unsqueeze(0)
-                out_temp = self.models[model_no].FC2vol(out_temp)                
+                out_temp = self.models[model_no].FC2vol(out_temp)     
                 out += out_temp
             else:  
                 local_positions_at_depth = self.octree.global_to_local_batch(
                     global_positions, depth)
-                
+
                 for i in range(len(blocks)):
                     max_num_points = 1024**2 * 4
                     b_start = 0

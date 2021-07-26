@@ -900,7 +900,6 @@ def AvgPool3D(x : torch.Tensor, size: int):
 
 def local_to_global(local_coords, block_shapes, block_positions, full_shape):
     global_positions = (local_coords + 1) / 2
-
     for d in range(2, len(full_shape)):
         global_positions[...,d-2] *= (block_shapes[...,d]/full_shape[d])
         global_positions[...,d-2] += (block_positions[...,d-2]/full_shape[d])

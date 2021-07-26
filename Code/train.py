@@ -1,7 +1,7 @@
 from math import log10
 
 from numpy.core.shape_base import block
-from utility_functions import PSNR, PSNRfromL1, local_to_global, make_coord, str2bool, ssim, PSNRfromMSE
+from utility_functions import PSNR, PSNRfromL1, local_to_global, make_coord, ssim3D, str2bool, ssim, PSNRfromMSE
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
@@ -24,6 +24,7 @@ from torch.multiprocessing import spawn
 from torch.distributed import new_group, barrier, group, broadcast
 import h5py
 import socket
+from netCDF4 import Dataset
 
 class Trainer():
     def __init__(self, opt):
@@ -76,7 +77,6 @@ class Trainer():
         loss = nn.L1Loss().to(self.opt["device"])
         step = 0
         item = item.to(self.opt['device'])
-
         
         target_PSNR = self.opt['error_bound']
         MSE_limit = 10 ** ((-1*target_PSNR + 20*log10(1.0))/10)
@@ -148,7 +148,6 @@ class Trainer():
                             
                             global_positions = local_to_global(local_positions.clone(), shapes, poses, item.shape)                            
                             global_positions = global_positions.flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()
-                            
                             if((b, blocks_this_iter) not in model_caches.keys()):
                                 model_caches[(b, blocks_this_iter)] = model.block_index_to_global_indices_mapping(global_positions)
 
@@ -161,12 +160,11 @@ class Trainer():
                             local_positions = torch.rand([blocks_this_iter, 1, 1,
                                 queries, 3], device=self.opt['device']) * 2 - 1
                                 
-                            shapes = torch.tensor([block.shape for block in blocks[b:b+blocks_this_iter]], device=self.opt['device']).unsqueeze(1).unsqueeze(1)
-                            poses = torch.tensor([block.pos for block in blocks[b:b+blocks_this_iter]], device=self.opt['device']).unsqueeze(1).unsqueeze(1)
+                            shapes = torch.tensor([block.shape for block in blocks[b:b+blocks_this_iter]], device=self.opt['device']).unsqueeze(1).unsqueeze(1).unsqueeze(1)
+                            poses = torch.tensor([block.pos for block in blocks[b:b+blocks_this_iter]], device=self.opt['device']).unsqueeze(1).unsqueeze(1).unsqueeze(1)
                             
                             global_positions = local_to_global(local_positions.clone(), shapes, poses, item.shape)                            
                             global_positions = global_positions.flatten(0, -2).unsqueeze(0).unsqueeze(0).unsqueeze(0).contiguous()
-                            
                             if((b, blocks_this_iter) not in model_caches.keys()):
                                 model_caches[(b, blocks_this_iter)] = model.block_index_to_global_indices_mapping(global_positions)
 
@@ -175,7 +173,6 @@ class Trainer():
                                 local_positions=local_positions, block_start=b)
                             block_item = F.grid_sample(item.expand([-1, -1, -1, -1, -1]), 
                                 global_positions.flip(-1), mode='bilinear', align_corners=False)
-                        
                         block_error = loss(block_output,block_item) * queries * blocks_this_iter #* (blocks_this_iter/len(blocks))
                         block_error.backward(retain_graph=True)
                         block_error_sum += block_error.detach()
@@ -207,10 +204,14 @@ class Trainer():
                         best_MSE = block_error_sum
                         best_MSE_epoch = epoch
 
+                    if(epoch % self.opt['save_every'] == 0 and (not self.opt['train_distributed'] or rank == 0)):
+                        save_model(model, self.opt)
+                        print("Saved model and octree")
+
                     if(step % self.opt['log_every'] == 0 and 
                         (not self.opt['train_distributed'] or rank == 0)
                         and self.opt['log_img']):
-                        self.log_with_image(model, item, block_error_sum, writer, step)
+                        self.log_with_image(model, item, block_error_sum, writer, step, img_size=list(item.shape[2:]))
 
                     elif(step % 5 == 0 and (not self.opt['train_distributed'] or rank == 0)):
                         print("Iteration %i, L1: %0.06f" % \
@@ -219,9 +220,6 @@ class Trainer():
                         writer.add_scalar('L1', block_error_sum, step)
                     step += 1
                 
-                    if(epoch % self.opt['save_every'] == 0 and (not self.opt['train_distributed'] or rank == 0)):
-                        save_model(model, self.opt)
-                        print("Saved model and octree")
                     epoch += 1
             
             if(self.opt['train_distributed']):
@@ -231,8 +229,8 @@ class Trainer():
                     broadcast(param, 0)
 
             if((rank == 0 or not self.opt['train_distributed']) and self.opt['log_img']):
-                self.log_with_image(model, item, block_error_sum, writer, step)
-
+                self.log_with_image(model, item, block_error_sum, writer, step, img_size=list(item.shape[2:]))
+            
             if(model_num < self.opt['octree_depth_end'] - self.opt['octree_depth_start']-1):
 
                 model = model.to(self.opt['device'])
@@ -240,10 +238,12 @@ class Trainer():
 
                 if(self.opt['use_residual']):
                     with torch.no_grad():   
-                        sample_points = make_coord(item.shape[2:], self.opt['device'], 
+                        if('2D' in self.opt['mode']):
+                            sample_points = make_coord(item.shape[2:], self.opt['device'], 
                                 flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()    
-                        if('3D' in self.opt['mode']):
-                            sample_points = sample_points.unsqueeze(0)   
+                        elif('3D' in self.opt['mode']):
+                            sample_points = make_coord(item.shape[2:], self.opt['device'], 
+                                flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).unsqueeze(0).contiguous()     
                         reconstructed = model.forward_global_positions(sample_points)    
                         reconstructed = reconstructed.reshape(item.shape) 
                         model.residual = reconstructed.detach()  
@@ -259,13 +259,15 @@ class Trainer():
                 elif(not self.opt['error_bound_split']):
                     model.octree.split_all_at_depth(model.octree.max_depth())
 
-
                 #optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=model_optim,
                 #    milestones=[self.opt['epochs']/5, 
                 #    2*self.opt['epochs']/5, 
                 #    3*self.opt['epochs']/5, 
                 #    4*self.opt['epochs']/5],gamma=self.opt['gamma'])
                 self.opt['epoch'] = 0
+        
+        if((rank == 0 or not self.opt['train_distributed']) and self.opt['log_CDF']):
+            self.log_to_netCDF(model, item, writer)
 
         if(rank == 0 or not self.opt['train_distributed']):
             print("Total parameter count: %i" % model.count_parameters())   
@@ -280,49 +282,128 @@ class Trainer():
         with torch.no_grad():  
             if(self.opt['use_residual']):
                 temp_residual = model.residual
-                model.residual = None  
-            sample_points = make_coord(img_size, self.opt['device'], 
-                flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()     
-            if(self.opt['mode'] == '3D'):
-                sample_points = sample_points.unsqueeze(0)       
+                model.residual = None
+            if('2D' in self.opt['mode']):
+                sample_points = make_coord(img_size, self.opt['device'], 
+                    flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()
+            else:
+                sample_points = make_coord(img_size, self.opt['device'], 
+                    flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).unsqueeze(0).contiguous()
             reconstructed = model.forward_global_positions(sample_points).detach()
-            if(self.opt['mode'] == '3D'):
-                reconstructed = reconstructed[...,int(reconstructed.shape[-1]/2)]
             reconstructed = reconstructed.reshape(item.shape[0:2] + tuple(img_size))     
+            if(self.opt['mode'] == '3D'):
+                writer.add_image("reconstruction", reconstructed[0].clamp(0, 1)[...,int(reconstructed.shape[-1]/2)], step)
+                writer.add_image("real", item[0].clamp(0, 1)[...,int(item.shape[-1]/2)], step)
 
+            else:
+                writer.add_image("reconstruction", reconstructed[0].clamp(0, 1), step)
+                writer.add_image("real", item[0].clamp(0, 1), step)
+            
+            '''
             if(len(model.models) > 1):
                 res = model.forward_global_positions(sample_points, depth_end=model.octree.max_depth())    
-                if(self.opt['mode'] == '3D'):
-                    res = res[...,int(res.shape[-1]/2)]
                 res = res.reshape(item.shape[0:2] + tuple(img_size))
-                writer.add_image("Network"+str(len(model.models)-1)+"residual", 
-                    ((reconstructed-res)[0]+0.5).clamp(0, 1), step)
-            writer.add_image("reconstruction", reconstructed[0].clamp(0, 1), step)
-            octree_blocks = model.octree.get_octree_block_img(self.opt['device'])
-            if(self.opt['mode'] == '3D'):
-                octree_blocks = octree_blocks[...,int(octree_blocks.shape[-1]/2)]
+                if(self.opt['mode'] == '3D'):
+                    writer.add_image("Network"+str(len(model.models)-1)+"residual", 
+                        ((reconstructed-res)[0]+0.5).clamp(0, 1)[...,int(reconstructed.shape[-1]/2)], step)
+                else:
+                    writer.add_image("Network"+str(len(model.models)-1)+"residual", 
+                        ((reconstructed-res)[0]+0.5).clamp(0, 1), step)
+            '''
+            
+            
+
+            octree_blocks = model.octree.get_octree_block_img(self.opt['num_channels'], self.opt['device'])
+                                            
             octree_blocks = F.interpolate(octree_blocks,
-                size=img_size, mode="bilinear", align_corners=False)
-            writer.add_image("reconstruction_blocks", reconstructed[0].clamp(0, 1)*octree_blocks[0], step)
+                size=img_size, mode="bilinear" if '2D' in self.opt['mode'] else 'trilinear', align_corners=False)
+            if('3D' in self.opt['mode']):
+                writer.add_image("reconstruction_blocks", (reconstructed[0].clamp(0, 1)*octree_blocks[0])[...,int(reconstructed.shape[-1]/2)], step)
+            else:
+                writer.add_image("reconstruction_blocks", reconstructed[0].clamp(0, 1)*octree_blocks[0], step)
 
             if(self.opt['log_psnr']):
-                psnr = PSNR(reconstructed, F.interpolate(item, size=img_size, mode='bilinear', align_corners=False), 
+                psnr = PSNR(reconstructed, F.interpolate(item, size=img_size, mode='bilinear' if '2D' in self.opt['mode'] else 'trilinear', align_corners=False), 
                     torch.tensor(1.0)).item()
             else:
                 psnr = 0            
             if(self.opt['log_ssim']):
-                s = ssim(reconstructed, F.interpolate(item, size=img_size, mode='bilinear', align_corners=False)).item()
+                if('2D' in self.opt['mode']):
+                    s = ssim(reconstructed, F.interpolate(item, size=img_size, mode='bilinear', align_corners=False)).item()
+                else:
+                    s = ssim3D(reconstructed, F.interpolate(item, size=img_size, mode='trilinear', align_corners=False)).item()
             else:
                 s = 0
 
             print("Iteration %i, MSE: %0.06f, PSNR (dB): %0.02f, SSIM: %0.03f" % \
                 (step, block_error_sum.item(), psnr, s))
-            writer.add_scalar('Training PSNR', PSNRfromMSE(block_error_sum, torch.tensor(1.0, device=self.opt['device'])), step)
             writer.add_scalar('PSNR', psnr, step)
             writer.add_scalar('SSIM', s, step)         
             
             if(self.opt['use_residual']):
                 model.residual = temp_residual
+
+    def log_to_netCDF(self, model, item, writer):
+        with torch.no_grad():  
+            
+            if('2D' in self.opt['mode']):
+                sample_points = make_coord(item.shape[2:], self.opt['device'], 
+                    flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()
+            else:
+                sample_points = make_coord(item.shape[2:], self.opt['device'], 
+                    flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).unsqueeze(0).contiguous()
+            reconstructed = model.forward_global_positions(sample_points).detach()
+            reconstructed = reconstructed.reshape(item.shape[0:2] + tuple(item.shape[2:]))  
+            if(os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',self.opt['save_name'], "recon.nc"))):
+                os.remove(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',self.opt['save_name'], "recon.nc"))
+            if(os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',self.opt['save_name'], "GT.nc"))):
+                os.remove(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',self.opt['save_name'], "GT.nc"))
+            if(os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',self.opt['save_name'], "tree.nc"))):
+                os.remove(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',self.opt['save_name'], "tree.nc"))
+            if(self.opt['mode'] == '3D'):
+                rootgrp = Dataset(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',self.opt['save_name'], "recon.nc"), "w", format="NETCDF4")
+                rootgrp2 = Dataset(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',self.opt['save_name'], "GT.nc"), "w", format="NETCDF4")
+                rootgrp.createDimension("x")
+                rootgrp.createDimension("y")
+                rootgrp.createDimension("z")
+                rootgrp2.createDimension("x")
+                rootgrp2.createDimension("y")
+                rootgrp2.createDimension("z")
+                for chan_num in range(reconstructed.shape[1]):
+                    dim_i = rootgrp.createVariable('channel_'+str(chan_num), np.float32, ("x","y","z"))
+                    dim_i2 = rootgrp2.createVariable('channel_'+str(chan_num), np.float32, ("x","y","z"))
+                    dim_i[:] = reconstructed[0,chan_num].cpu().numpy()
+                    dim_i2[:] = item[0,chan_num].cpu().numpy()
+
+            else:
+                rootgrp = Dataset(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',self.opt['save_name'], "recon.nc"), "w", format="NETCDF4")
+                rootgrp2 = Dataset(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',self.opt['save_name'], "GT.nc"), "w", format="NETCDF4")
+                rootgrp.createDimension("x")
+                rootgrp.createDimension("y")
+                rootgrp2.createDimension("x")
+                rootgrp2.createDimension("y")
+                for chan_num in range(reconstructed.shape[1]):
+                    dim_i = rootgrp.createVariable('channel_'+str(chan_num), np.float32, ("x","y"))
+                    dim_i2 = rootgrp2.createVariable('channel_'+str(chan_num), np.float32, ("x","y"))
+                    dim_i[:] = reconstructed[0,chan_num].cpu().numpy()
+                    dim_i2[:] = item[0,chan_num].cpu().numpy()
+                rootgrp
+
+            octree_blocks = model.octree.get_octree_block_img(self.opt['num_channels'], self.opt['device'])
+                                            
+            if('3D' in self.opt['mode']):
+                octree_grp = Dataset(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',self.opt['save_name'], "tree.nc"), "w", format="NETCDF4")
+                octree_grp.createDimension("x")
+                octree_grp.createDimension("y")
+                octree_grp.createDimension("z")
+                dim_i = octree_grp.createVariable('blocks'+str(chan_num), np.float32, ("x","y","z"))
+                dim_i[:] = octree_blocks[0,0].cpu().numpy()
+            else:
+                octree_grp = Dataset(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',self.opt['save_name'], "tree.nc"), "w", format="NETCDF4")
+                octree_grp.createDimension("x")
+                octree_grp.createDimension("y")
+                dim_i = octree_grp.createVariable('blocks'+str(chan_num), np.float32, ("x","y"))
+                dim_i[:] = octree_blocks[0,0].cpu().numpy()
 
 
 if __name__ == '__main__':
@@ -366,6 +447,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_every',default=None, type=int,help='How often to save during training')
     parser.add_argument('--log_every',default=None, type=int,help='How often to log during training')
     parser.add_argument('--log_img',default=None, type=str2bool,help='Log img during training')
+    parser.add_argument('--log_CDF',default=None, type=str2bool,help='Log img during training')
     parser.add_argument('--log_ssim',default=None, type=str2bool,help='Log ssim during training')
 
     args = vars(parser.parse_args())

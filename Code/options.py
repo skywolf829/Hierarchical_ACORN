@@ -23,7 +23,7 @@ class Options():
         opt['num_positional_encoding_terms'] = 6
         opt['FC_size_exp_start']        = 3
         opt['FC_size_exp_grow']        = 0.5
-        opt['use_residual']            = True
+        opt['use_residual']            = False
 
         opt["octree_depth_start"]      = 0
         opt["octree_depth_end"]        = 6
@@ -46,6 +46,7 @@ class Options():
         opt["log_every"]               = 1000
         opt['log_loss']                = True
         opt['log_img']                 = True
+        opt['log_CDF']                 = True
         opt['log_psnr']                = True
         opt['log_ssim']                = True
 
