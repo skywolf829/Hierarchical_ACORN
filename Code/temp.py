@@ -141,5 +141,10 @@ if __name__ == '__main__':
     save_folder = os.path.join(project_folder_path, "SavedModels")
 
     f = h5py.File("./TrainingData/channel_ts0.h5", 'r')
-    print(f['data'].shape)
+    f2 = h5py.File("./TrainingData/channelflow.h5", 'w')
+    d = f['data']
+
+    f2['data'] = d[:,::2, ::2, ::2]
+    f.close()
+    f2.close()
 

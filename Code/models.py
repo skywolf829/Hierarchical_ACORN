@@ -448,6 +448,44 @@ class HierarchicalACORN(nn.Module):
                 index_to_global_positions_indices[block.index] = torch.nonzero(mask, as_tuple=False)[:,-1]
         return index_to_global_positions_indices
       
+    def forward_global_positions_single_block(self, global_positions, block):
+        if('2D' in self.opt['mode']):
+            out_shape = [global_positions.shape[0], self.opt['num_channels'], 1, global_positions.shape[-2]]
+        else:
+            out_shape = [global_positions.shape[0], self.opt['num_channels'], 1, 1, global_positions.shape[-2]]
+
+        out = torch.zeros(out_shape, device=self.opt['device'])
+        if(self.opt['use_residual'] and self.residual is not None):
+            out += F.grid_sample(self.residual, 
+                global_positions.flip(-1), mode='bilinear', align_corners=False).detach()
+
+        while(block is not None):
+            depth = block.depth
+            model_no = depth - self.opt['octree_depth_start']
+
+            block_positions = torch.tensor(self.octree.block_to_pos(block), 
+                    device=self.opt['device'])
+
+            encoded_positions = self.pe(block_positions)
+            feat_grids = self.models[model_no].feature_encoder(encoded_positions)
+
+            self.models[model_no].feat_grid_shape[0] = feat_grids.shape[0]
+            feat_grids = feat_grids.reshape(self.models[model_no].feat_grid_shape)
+            
+            feat = F.grid_sample(feat_grids, 
+                    self.octree.global_to_local(global_positions, block.index, block.depth), 
+                    mode='bilinear', align_corners=False)
+            feat = self.models[model_no].vol2FC(feat)
+            out_temp = self.models[model_no].feature_decoder(feat)
+            out_temp = out_temp.flatten(0, -2).unsqueeze(0).unsqueeze(0)
+            if(self.opt['mode'] == '3D'):
+                out_temp = out_temp.unsqueeze(0)
+            out_temp = self.models[model_no].FC2vol(out_temp)     
+            out += out_temp
+            block = block.parent
+            
+        return out
+
     #@profile
     def forward_global_positions(self, global_positions, index_to_global_positions_indices=None, 
     depth_start=None, depth_end=None, local_positions=None, block_start=None):

@@ -128,16 +128,20 @@ class OctreeNodeList:
             for block in self.depth_to_nodes[k].values():
 
                 if(len(self.full_shape) == 4):
-                    base[:,:,block.pos[0]:block.pos[0]+block.shape[2],
+                    base[:,:,
+                        block.pos[0]:block.pos[0]+block.shape[2],
                         block.pos[1]] = color_to_fill
 
-                    base[:,:,block.pos[0],
-                        block.pos[1]:block.pos[1]+block.shape[3]] = color_to_fill
-
-                    base[:,:,block.pos[0]:block.pos[0]+block.shape[2],
+                    base[:,:,
+                        block.pos[0]:block.pos[0]+block.shape[2],
                         block.pos[1]+block.shape[3]-1] = color_to_fill
 
-                    base[:,:,block.pos[0]+block.shape[2]-1,
+                    base[:,:,
+                        block.pos[0],
+                        block.pos[1]:block.pos[1]+block.shape[3]] = color_to_fill
+
+                    base[:,:,
+                        block.pos[0]+block.shape[2]-1,
                         block.pos[1]:block.pos[1]+block.shape[3]] = color_to_fill
                 else:
                     base[:,:,block.pos[0]:block.pos[0]+block.shape[2],
@@ -202,12 +206,17 @@ class OctreeNodeList:
     def split_from_error_max_depth_blockwise(self, model, item, error_func, max_error, opt):
         max_depth = self.max_depth()
 
-        coord_shape = [int(opt['feat_grid_x']/2), int(opt['feat_grid_y']/2)]
-        if(opt['mode'] != '2D'):
-            coord_shape.append(int(opt['feat_grid_z']/2))
-
         for block in self.depth_to_nodes[max_depth].values():
             split_nodes = block.split()
+            b_shape = block.shape[2:]
+            mult = 1
+            for b_ in b_shape:
+                mult *= (b_ / 2)
+            if(mult > model.opt['local_queries_per_iter']):
+                coord_shape = [int(model.opt['local_queries_per_iter']**(1/len(b_shape)))]*len(b_shape)
+            else:
+                coord_shape = [int(b_shape[i] / 2) for i in range(len(b_shape))]
+
             for b in split_nodes:           
                 shapes = torch.tensor([b.shape], device=opt['device']).unsqueeze(1).unsqueeze(1)
                 poses = torch.tensor([b.pos], device=opt['device']).unsqueeze(1).unsqueeze(1)
@@ -216,14 +225,16 @@ class OctreeNodeList:
                     flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()
                 if(len(self.full_shape) > 4):
                     sample_points = sample_points.unsqueeze(0)
+                    shapes = shapes.unsqueeze(1)
+                    poses = poses.unsqueeze(1)
                      
                 sample_points = local_to_global(sample_points, 
                     shapes, poses,
                     item.shape
                     ) 
-                block_reconstruction = model.forward_global_positions(sample_points)
+                block_reconstruction = model.forward_global_positions_single_block(sample_points, block)
                 item_points = F.grid_sample(
-                    item.expand([-1, -1, -1, -1]) if opt['mode'] == '2D' else item.expand([-1, -1, -1, -1, -1]), 
+                    item.expand([-1, -1, -1, -1]) if '2D' in opt['mode'] else item.expand([-1, -1, -1, -1, -1]), 
                     sample_points.flip(-1), 
                     mode='bilinear', 
                     align_corners=False)
@@ -246,6 +257,16 @@ class OctreeNodeList:
                 p.append(p_i)
             block_positions.append(p)
         return block_positions
+
+    def block_to_pos(self, block):
+        block_position = []
+        for j in range(len(block.pos)):
+            p_i = block.pos[j] / self.full_shape[2+j]
+            p_i = p_i - 0.5
+            p_i = p_i * 2
+            p_i = p_i + (1/(2**block.depth))
+            block_position.append(p_i)
+        return [block_position]
 
     def depth_to_blocks_and_block_positions(self, depth_level):
         blocks = list(self.depth_to_nodes[depth_level].values())
