@@ -52,7 +52,7 @@ def load_model(opt, device):
     else:
         print("Warning: no octree associated with model")
 
-    for model_num in range(opt['octree_depth_end'] - opt['octree_depth_start']):
+    for model_num in range(opt['octree_depth_end'] - opt['octree_depth_start'] - 1):
         model.add_model(torch.tensor([1.0], dtype=torch.float32, device=device))
 
     if os.path.exists(os.path.join(folder_to_load_from, "model.ckpt")):
