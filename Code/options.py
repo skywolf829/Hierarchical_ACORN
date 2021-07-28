@@ -35,7 +35,7 @@ class Options():
         opt["num_nodes"]               = 1
         opt["node_num"]                = 0
 
-        opt["epochs"]                  = 5000
+        opt["epochs"]                  = 10000
         opt["lr"]                      = 0.001
         opt["beta_1"]                  = 0.5
         opt["beta_2"]                  = 0.999
@@ -45,8 +45,8 @@ class Options():
         opt["save_every"]              = 1000
         opt["log_every"]               = 1000
         opt['log_loss']                = True
-        opt['log_img']                 = True
-        opt['log_CDF']                 = True
+        opt['log_img']                 = False
+        opt['log_CDF']                 = False
         opt['log_psnr']                = True
         opt['log_ssim']                = True
 
