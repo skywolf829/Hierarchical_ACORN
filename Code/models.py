@@ -484,7 +484,7 @@ class HierarchicalACORN(nn.Module):
             
         return out
 
-    @profile
+    #@profile
     def forward_global_positions(self, global_positions, index_to_global_positions_indices=None, 
     depth_start=None, depth_end=None, local_positions=None, block_start=None):
         if depth_start is None:
