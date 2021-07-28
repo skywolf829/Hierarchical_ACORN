@@ -12,7 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 import time
 import torch.optim as optim
 import os
-from models import save_model
+from models import load_model, save_model
 import numpy as np
 from octree import OctreeNodeList
 from options import *
@@ -467,12 +467,20 @@ if __name__ == '__main__':
         for k in args.keys():
             if args[k] is not None:
                 opt[k] = args[k]
-        item = h5py.File(os.path.join(project_folder_path, opt['target_signal']), 'r')['data']
-        item = torch.tensor(item).unsqueeze(0)
+        
         model = HierarchicalACORN(opt)
         for model_num in range(opt['octree_depth_end'] - opt['octree_depth_start'] - 1):
             model.add_model(torch.tensor([1.0], dtype=torch.float32, device=opt['device']))
+    else:
+        opt = load_options(os.path.join(save_folder, args['load_from']))
+        opt['device'] = args['device']
+        model = load_model(opt, args['device'])
+        for i in range(len(model.models)):
+            model.models[i] = model.models[i].to(opt['device'])
 
+    item = h5py.File(os.path.join(project_folder_path, opt['target_signal']), 'r')['data']
+    item = torch.tensor(item).unsqueeze(0)
+    
     trainer = Trainer(opt)
 
     if(not opt['train_distributed']):
