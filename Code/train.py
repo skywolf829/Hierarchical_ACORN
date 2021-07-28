@@ -480,7 +480,7 @@ if __name__ == '__main__':
 
     item = h5py.File(os.path.join(project_folder_path, opt['target_signal']), 'r')['data']
     item = torch.tensor(item).unsqueeze(0)
-    
+
     trainer = Trainer(opt)
 
     if(not opt['train_distributed']):

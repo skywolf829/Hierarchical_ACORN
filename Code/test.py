@@ -36,7 +36,7 @@ def output_netCDF(model, item, opt):
             sample_points = make_coord(item.shape[2:], opt['device'], 
                 flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).unsqueeze(0).contiguous()
         reconstructed = model.forward_global_positions(sample_points).detach()
-        print(reconstructed.shape)
+
         reconstructed = reconstructed.reshape(item.shape[0:2] + tuple(item.shape[2:]))  
         if(os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "recon.nc"))):
             os.remove(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "recon.nc"))
