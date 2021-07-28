@@ -30,7 +30,7 @@ class Trainer():
     def __init__(self, opt):
         self.opt = opt
 
-    @profile
+    #@profile
     def train(self, rank, model, item):
         torch.manual_seed(0b10101010101010101010101010101010)
         if(self.opt['train_distributed']):
