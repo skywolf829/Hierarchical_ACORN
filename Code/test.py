@@ -45,6 +45,9 @@ def output_netCDF(model, item, opt):
         if(os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "tree.nc"))):
             os.remove(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "tree.nc"))
 
+        p = PSNR(reconstructed, item, torch.tensor([1.0], dtype=torch.float32, device=opt['device']))
+        print("PSNR: %0.04f" % p)
+
         if(opt['mode'] == '3D'):
             rootgrp = Dataset(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "recon.nc"), "w", format="NETCDF4")
             rootgrp2 = Dataset(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "GT.nc"), "w", format="NETCDF4")

@@ -99,8 +99,8 @@ class Trainer():
                     device=self.opt['device'])
                     
             if(rank == 0 or not self.opt['train_distributed']):
-                print("Model %i, total parameter count: %i, num blocks: %i" % 
-                    (model_num, model.count_parameters(), len(blocks)))
+                print("Model %i/%i, total parameter count: %i, num blocks: %i" % 
+                    (model_num, len(model.models), model.count_parameters(), len(blocks)))
             if(self.opt['train_distributed']):
                 num_blocks = len(blocks)
                 if(rank == 0):
