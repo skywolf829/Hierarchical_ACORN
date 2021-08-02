@@ -143,6 +143,9 @@ def output_img(model, item, opt):
         else:
             img = (reconstructed*octree_blocks).cpu()[0].permute(1, 2, 0).numpy()
             imageio.imwrite(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "reconstructed_blocks.jpg"), img)
+            img = torch.norm(reconstructed - item, dim=1)[0].cpu().numpy() / (reconstructed.shape[1] ** 0.5)
+            imageio.imwrite(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "error.jpg"), img)
+
 
 
 if __name__ == '__main__':
