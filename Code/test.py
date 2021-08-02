@@ -25,6 +25,7 @@ from torch.distributed import new_group, barrier, group, broadcast
 import h5py
 import socket
 from netCDF4 import Dataset
+import imageio
 
 def output_netCDF(model, item, opt):
     
@@ -93,6 +94,57 @@ def output_netCDF(model, item, opt):
             dim_i = octree_grp.createVariable('blocks'+str(chan_num), np.float32, ("x","y"))
             dim_i[:] = octree_blocks[0,0].cpu().numpy()
 
+def output_img(model, item, opt):
+    
+    with torch.no_grad():      
+        if('2D' in opt['mode']):
+            sample_points = make_coord(item.shape[2:], opt['device'], 
+                flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).contiguous()
+        else:
+            sample_points = make_coord(item.shape[2:], opt['device'], 
+                flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).unsqueeze(0).contiguous()
+
+        t = time.time()
+        reconstructed = model.forward_global_positions(sample_points).detach()
+        print("Reconstruction time: %0.02f" % (time.time() - t))
+        reconstructed = reconstructed.reshape(item.shape[0:2] + tuple(item.shape[2:])).clamp_(0, 1)
+        
+        p = PSNR(reconstructed, item, torch.tensor([1.0], dtype=torch.float32, device=opt['device']))
+        print("PSNR: %0.04f" % p)
+
+        if(opt['mode'] == '3D'):
+            rootgrp = Dataset(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "recon.nc"), "w", format="NETCDF4")
+            rootgrp2 = Dataset(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "GT.nc"), "w", format="NETCDF4")
+            rootgrp.createDimension("x")
+            rootgrp.createDimension("y")
+            rootgrp.createDimension("z")
+            rootgrp2.createDimension("x")
+            rootgrp2.createDimension("y")
+            rootgrp2.createDimension("z")
+            for chan_num in range(reconstructed.shape[1]):
+                dim_i = rootgrp.createVariable('channel_'+str(chan_num), np.float32, ("x","y","z"))
+                dim_i2 = rootgrp2.createVariable('channel_'+str(chan_num), np.float32, ("x","y","z"))
+                dim_i[:] = reconstructed[0,chan_num].cpu().numpy()
+                dim_i2[:] = item[0,chan_num].cpu().numpy()
+
+        else:
+            img = reconstructed.cpu()[0].permute(1, 2, 0).numpy()
+            imageio.imwrite(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "reconstructed.jpg"), img)
+
+        octree_blocks = model.octree.get_octree_block_img(opt['num_channels'], opt['device'])
+                                        
+        if('3D' in opt['mode']):
+            octree_grp = Dataset(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "tree.nc"), "w", format="NETCDF4")
+            octree_grp.createDimension("x")
+            octree_grp.createDimension("y")
+            octree_grp.createDimension("z")
+            dim_i = octree_grp.createVariable('blocks'+str(chan_num), np.float32, ("x","y","z"))
+            dim_i[:] = octree_blocks[0,0].cpu().numpy()
+        else:
+            img = (reconstructed*octree_blocks).cpu()[0].permute(1, 2, 0).numpy()
+            imageio.imwrite(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "reconstructed_blocks.jpg"), img)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Create netCDF output from a trained model')
 
@@ -116,4 +168,5 @@ if __name__ == '__main__':
     item = h5py.File(os.path.join(project_folder_path, opt['target_signal']), 'r')['data']
     item = torch.tensor(item).unsqueeze(0).to(opt['device'])
 
-    output_netCDF(model, item, opt)
+    #output_netCDF(model, item, opt)
+    output_img(model, item, opt)
