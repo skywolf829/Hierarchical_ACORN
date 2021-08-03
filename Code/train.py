@@ -196,7 +196,7 @@ class Trainer():
                     model_optim.step()
                     #optim_scheduler.step()
                     
-                    if(block_error_sum > best_MSE and best_MSE_epoch < epoch - 1000):
+                    if(block_error_sum > best_MSE and best_MSE_epoch < epoch - 2500):
                         early_stop = True
                         if(rank == 0 or not self.opt['train_distributed']):
                             print("Stopping early")
