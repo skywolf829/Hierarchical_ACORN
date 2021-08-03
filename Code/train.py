@@ -196,11 +196,11 @@ class Trainer():
                     model_optim.step()
                     #optim_scheduler.step()
                     
-                    if(block_error_sum > best_MSE and best_MSE_epoch < epoch - 100):
+                    if(block_error_sum > best_MSE and best_MSE_epoch < epoch - 1000):
                         early_stop = True
                         if(rank == 0 or not self.opt['train_distributed']):
                             print("Stopping early")
-                    else:
+                    elif(block_error_sum < best_MSE):
                         best_MSE = block_error_sum
                         best_MSE_epoch = epoch
 
@@ -214,8 +214,11 @@ class Trainer():
                         self.log_with_image(model, item, block_error_sum, writer, step, img_size=list(item.shape[2:]))
 
                     elif(step % 5 == 0 and (not self.opt['train_distributed'] or rank == 0)):
-                        print("Iteration %i, L1: %0.06f" % \
-                                (epoch, block_error_sum.item()))
+                        print("Model %i/%i, epoch %i/%i, iteration %i, L1: %0.06f" % \
+                                (model_num, len(model.models), 
+                                epoch, self.opt['epochs'],
+                                step, 
+                                block_error_sum.item()))
                         writer.add_scalar('Training PSNR', PSNRfromL1(block_error_sum, torch.tensor(1.0, device=self.opt['device'])), step)
                         writer.add_scalar('L1', block_error_sum, step)
                     step += 1
@@ -236,7 +239,7 @@ class Trainer():
                 model = model.to(self.opt['device'])
                 model.pe = PositionalEncoding(self.opt)
 
-                if(self.opt['use_residual']):
+                if(self.opt['use_residual'] and False):
                     with torch.no_grad():   
                         if('2D' in self.opt['mode']):
                             sample_points = make_coord(item.shape[2:], self.opt['device'], 
@@ -293,11 +296,11 @@ class Trainer():
             reconstructed = reconstructed.reshape(item.shape[0:2] + tuple(img_size))     
             if(self.opt['mode'] == '3D'):
                 writer.add_image("reconstruction", reconstructed[0].clamp(0, 1)[...,int(reconstructed.shape[-1]/2)], step)
-                writer.add_image("real", item[0].clamp(0, 1)[...,int(item.shape[-1]/2)], step)
+                #writer.add_image("real", item[0].clamp(0, 1)[...,int(item.shape[-1]/2)], step)
 
             else:
                 writer.add_image("reconstruction", reconstructed[0].clamp(0, 1), step)
-                writer.add_image("real", item[0].clamp(0, 1), step)
+                #writer.add_image("real", item[0].clamp(0, 1), step)
             
             '''
             if(len(model.models) > 1):
