@@ -509,8 +509,8 @@ class HierarchicalACORN(nn.Module):
         if(self.opt['use_residual'] and self.residual is not None):
             out += F.grid_sample(self.residual, 
                 global_positions.flip(-1), mode='bilinear', align_corners=False).detach()
-
-
+                
+            
         start_time = time.time()
         for depth in range(depth_start, depth_end):
             model_start_time = time.time()
@@ -542,8 +542,8 @@ class HierarchicalACORN(nn.Module):
                 local_positions_at_depth = self.octree.global_to_local_batch(
                     global_positions, depth)
 
-                for i in range(block_start, block_start+local_positions.shape[0]):
-                    max_num_points = 1024**2 * 4
+                for i in range(len(blocks)):
+                    max_num_points = 128**2 * 4
                     b_start = 0
                     while(b_start < index_to_global_positions_indices[blocks[i].index].shape[0]):
                         b_end = min(b_start + max_num_points, 

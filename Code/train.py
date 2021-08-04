@@ -30,7 +30,7 @@ class Trainer():
     def __init__(self, opt):
         self.opt = opt
 
-    @profile
+    #@profile
     def train(self, rank, model, item):
         torch.manual_seed(0b10101010101010101010101010101010)
         if(self.opt['train_distributed']):
@@ -153,6 +153,7 @@ class Trainer():
 
                             block_output = model.forward_global_positions(global_positions, 
                                 index_to_global_positions_indices=model_caches[(b, blocks_this_iter)],
+                                depth_start=model_num, depth_end=model_num+1,
                                 local_positions=local_positions, block_start=b)
                             block_item = F.grid_sample(item.expand([-1, -1, -1, -1]), 
                                 global_positions.flip(-1), mode='bilinear', align_corners=False)
@@ -170,7 +171,8 @@ class Trainer():
 
                             block_output = model.forward_global_positions(global_positions, 
                                 index_to_global_positions_indices=model_caches[(b, blocks_this_iter)],
-                                local_positions=local_positions, block_start=b)
+                                depth_start=model_num, depth_end=model_num+1,
+                                local_positions=local_positions, block_start=b, block_end=b+blocks_this_iter)
                             block_item = F.grid_sample(item.expand([-1, -1, -1, -1, -1]), 
                                 global_positions.flip(-1), mode='bilinear', align_corners=False)
                         block_error = loss(block_output,block_item) * queries * blocks_this_iter #* (blocks_this_iter/len(blocks))
@@ -221,6 +223,8 @@ class Trainer():
                                 block_error_sum.item()))
                         writer.add_scalar('Training PSNR', PSNRfromL1(block_error_sum, torch.tensor(1.0, device=self.opt['device'])), step)
                         writer.add_scalar('L1', block_error_sum, step)
+                        MBytes = (torch.cuda.memory_allocated(device=self.opt['device']) / (1024**2))
+                        writer.add_scalar('GPU memory (MB)', MBytes, step)
                     step += 1
                 
                     epoch += 1
@@ -239,7 +243,7 @@ class Trainer():
                 model = model.to(self.opt['device'])
                 model.pe = PositionalEncoding(self.opt)
 
-                if(self.opt['use_residual'] and False):
+                if(self.opt['use_residual']):
                     with torch.no_grad():   
                         if('2D' in self.opt['mode']):
                             sample_points = make_coord(item.shape[2:], self.opt['device'], 
@@ -247,12 +251,11 @@ class Trainer():
                         elif('3D' in self.opt['mode']):
                             sample_points = make_coord(item.shape[2:], self.opt['device'], 
                                 flatten=False).flatten(0, -2).unsqueeze(0).unsqueeze(0).unsqueeze(0).contiguous()     
-                        reconstructed = model.forward_global_positions(sample_points)    
+                        reconstructed = model.forward_global_positions(sample_points).detach()    
                         reconstructed = reconstructed.reshape(item.shape) 
-                        model.residual = reconstructed.detach()  
+                        model.residual = reconstructed 
                         model.octree.split_from_error_max_depth(reconstructed, item, 
-                            nn.MSELoss().to(self.opt["device"]), MSE_limit)    
-                        del reconstructed
+                            nn.MSELoss().to(self.opt["device"]), MSE_limit)
 
                 elif(self.opt['error_bound_split']):
                     with torch.no_grad(): 
