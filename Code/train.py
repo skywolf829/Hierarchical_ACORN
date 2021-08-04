@@ -136,8 +136,8 @@ class Trainer():
                         self.opt['min_queries_per_block'])
                     total_queries = torch.tensor(0, dtype=torch.int, device=self.opt['device'])
                     while b < b_stop:
-                        blocks_this_iter = min(self.opt['max_blocks_per_iter'], b_stop-b)
-                        #blocks_this_iter = b_stop-b
+                        #blocks_this_iter = min(self.opt['max_blocks_per_iter'], b_stop-b)
+                        blocks_this_iter = b_stop-b
 
                         if('2D' in self.opt['mode']):
                             local_positions = torch.rand([blocks_this_iter, 1, 
