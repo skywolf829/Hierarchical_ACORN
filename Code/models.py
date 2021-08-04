@@ -226,7 +226,8 @@ class HierarchicalACORN(nn.Module):
             self.octree.delete_depth_level(i)
 
     def add_model(self, error):
-        self.models.append(ACORN(int(2**(len(self.models)*self.opt['FC_size_exp_grow']+self.opt['FC_size_exp_start'])), 
+        self.models.append(ACORN(int(2**(len(self.models)*self.opt['FC_size_exp_grow']+\
+            self.opt['FC_size_exp_start'])), 
             self.opt))
         self.RMSE = torch.cat([self.RMSE, error])
 
