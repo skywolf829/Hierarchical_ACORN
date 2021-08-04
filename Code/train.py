@@ -136,8 +136,8 @@ class Trainer():
                         self.opt['min_queries_per_block'])
                     total_queries = torch.tensor(0, dtype=torch.int, device=self.opt['device'])
                     while b < b_stop:
-                        #blocks_this_iter = min(self.opt['max_blocks_per_iter'], b_stop-b)
-                        blocks_this_iter = b_stop-b
+                        blocks_this_iter = min(self.opt['max_blocks_per_iter'], b_stop-b)
+                        #blocks_this_iter = b_stop-b
 
                         if('2D' in self.opt['mode']):
                             local_positions = torch.rand([blocks_this_iter, 1, 
@@ -203,7 +203,7 @@ class Trainer():
                     elif(block_error_sum < best_MSE):
                         best_MSE = block_error_sum
                         best_MSE_epoch = epoch
-
+                        
                     if(epoch % self.opt['save_every'] == 0 and (not self.opt['train_distributed'] or rank == 0)):
                         save_model(model, self.opt)
                         print("Saved model and octree")
