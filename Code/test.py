@@ -129,10 +129,11 @@ def output_img(model, item, opt):
 
         else:
             img = reconstructed.cpu()[0].permute(1, 2, 0).numpy()
-            imageio.imwrite(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "reconstructed.jpg"), img)
+            imageio.imwrite(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "reconstructed.png"), img)
 
         octree_blocks = model.octree.get_octree_block_img(opt['num_channels'], opt['device'])
-                                        
+        octree_blocks = 1 - octree_blocks
+
         if('3D' in opt['mode']):
             octree_grp = Dataset(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "tree.nc"), "w", format="NETCDF4")
             octree_grp.createDimension("x")
@@ -141,10 +142,11 @@ def output_img(model, item, opt):
             dim_i = octree_grp.createVariable('blocks'+str(chan_num), np.float32, ("x","y","z"))
             dim_i[:] = octree_blocks[0,0].cpu().numpy()
         else:
-            img = (reconstructed*octree_blocks).cpu()[0].permute(1, 2, 0).numpy()
-            imageio.imwrite(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "reconstructed_blocks.jpg"), img)
+            img = torch.where(octree_blocks > 0.5, octree_blocks, reconstructed).cpu()[0].permute(1, 2, 0).numpy()
+            #img = (reconstructed*octree_blocks).cpu()[0].permute(1, 2, 0).numpy()
+            imageio.imwrite(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "reconstructed_blocks.png"), img)
             img = torch.norm(reconstructed - item, dim=1)[0].cpu().numpy() / (reconstructed.shape[1] ** 0.5)
-            imageio.imwrite(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "error.jpg"), img)
+            imageio.imwrite(os.path.join(os.path.dirname(os.path.abspath(__file__)),"..",'SavedModels',opt['save_name'], "error.png"), img)
 
 
 
@@ -166,6 +168,7 @@ if __name__ == '__main__':
     opt = load_options(os.path.join(save_folder, args['load_from']))
     opt['device'] = args['device']
     model = load_model(opt, args['device'])
+    model.pe = model.pe.to(opt['device'])
     for i in range(len(model.models)):
         model.models[i] = model.models[i].to(opt['device'])
     item = h5py.File(os.path.join(project_folder_path, opt['target_signal']), 'r')['data']

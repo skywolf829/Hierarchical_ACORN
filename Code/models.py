@@ -543,7 +543,7 @@ class HierarchicalACORN(nn.Module):
                     global_positions, depth)
 
                 for i in range(len(blocks)):
-                    max_num_points = 128**2 * 4
+                    max_num_points = 1024**2 * 4
                     b_start = 0
                     while(b_start < index_to_global_positions_indices[blocks[i].index].shape[0]):
                         b_end = min(b_start + max_num_points, 

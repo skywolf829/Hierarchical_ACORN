@@ -19,10 +19,10 @@ class Options():
         opt['feat_grid_z']              = 32
         opt['local_queries_per_iter']   = 100000
         opt['min_queries_per_block']    = 16
-        opt['max_blocks_per_iter']      = 2048
+        opt['max_blocks_per_iter']      = 16384
         opt['num_positional_encoding_terms'] = 6
-        opt['FC_size_exp_start']        = 3
-        opt['FC_size_exp_grow']        = 0.5
+        opt['FC_size_exp_start']        = 1
+        opt['FC_size_exp_grow']        = 1.25
         opt['use_residual']            = False
 
         opt["octree_depth_start"]      = 0
