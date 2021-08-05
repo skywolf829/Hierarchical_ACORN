@@ -16,5 +16,5 @@ python -u Code/train.py --use_residual true --FC_size_exp_start 3 --FC_size_exp_
 --num_channels 3 --mode 2D --local_queries_per_iter 1000000
 
 python -u Code/train.py --use_residual true --FC_size_exp_start 4 --FC_size_exp_grow 0 \
---octree_depth_end 2 --save_name pluto_2models_size4 --target_signal TrainingData/pluto.h5 \
+--octree_depth_end 4 --save_name pluto_2models_size4 --target_signal TrainingData/pluto.h5 \
 --num_channels 3 --mode 2D --local_queries_per_iter 1000000
