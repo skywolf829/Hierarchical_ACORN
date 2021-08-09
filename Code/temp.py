@@ -12,6 +12,7 @@ from netCDF4 import Dataset
 import matplotlib.pyplot as plt
 from utility_functions import make_coord
 from torch.linalg import norm
+from matplotlib.ticker import ScalarFormatter
 
 def create_toy_data():
     f = h5py.File("./3D_toydata.h5", 'w')
@@ -27,71 +28,49 @@ def create_toy_data():
     f.close()
 
 def create_graphs():
-    x = [1, 2, 3, 4, 5, 6, 7, 8]
-    total_train_time = [9 + 7/60, 
-                        7 + 21/60, 
-                        6 + 44/60, 
-                        6 + 11/60, 
-                        6 + 1/60,
-                        5 + 59/60,
-                        5 + 45/60, 
-                        5 + 46/60]
+    x = [1, 2, 4, 8]
+    total_train_time = [65 + 29/60,
+    39 + 55/60,
+    28 + 37/60,
+    21 + 50/60]
 
-    model1_train_time = [25/60, 
-                        26/60, 
-                        27/60, 
-                        26/60, 
-                        28/60,
-                        28/60,
-                        28/60, 
-                        28/60]
+    model1_train_time = [1 + 42/60,
+    1 + 42/60,
+    1 + 42/60,
+    1 + 44/60]
 
-    model2_train_time = [56/60, 
-                        59/60,
-                        1,
-                        59/60,
-                        1 + 0/60,
-                        1 + 1/60,
-                        1 + 0/60, 
-                        1 + 1/60]
+    model2_train_time = [3 + 50/60,
+    3 + 13/60,
+    3 + 3/60,
+    3 + 7/60]
 
-    model3_train_time = [1 + 37/60, 
-                        1 + 38/60,
-                        1 + 40/60, 
-                        1 + 38/60,
-                        1 + 40/60,
-                        1 + 39/60,
-                        1 + 40/60, 
-                        1 + 39/60]
+    model3_train_time = [6 + 20/60,
+    5 + 1/60,
+    4 + 40/60,
+    4 + 42/60]
 
-    model4_train_time = [2 + 38/60, 
-                        2 + 35/60,
-                        2 + 34/60,
-                        2 + 28/60, 
-                        2 + 30/60, 
-                        2 + 29/60, 
-                        2 + 28/60,
-                        2 + 28/60]
+    model4_train_time = [9 + 36/60,
+    7 + 17/60,
+    6 + 40/60,
+    6 + 32/60]
 
-    model5_train_time = [4 + 31/60, 
-                        4 + 6/60,
-                        3 + 53/60,
-                        3 + 40/60, 
-                        3 + 40/60,
-                        3 + 40/60,
-                        3 + 35/60,
-                        3 + 36/60]    
+    model5_train_time = [15 + 27/60,
+    10 + 56/60,
+    9 + 33/60,
+    8 + 57/60]    
 
-    model6_train_time = [9 + 7/60, 
-                        7 + 21/60, 
-                        6 + 44/60, 
-                        6 + 11/60, 
-                        6 + 1/60,
-                        5 + 59/60,
-                        5 + 45/60, 
-                        5 + 46/60]  
+    model6_train_time = [28 + 53/60,
+    18 + 47/60,
+    14 + 44/60,
+    12 + 52/60]  
+
+    model7_train_time = [65 + 29/60,
+    39 + 55/60,
+    28 + 37/60,
+    21 + 50/60] 
     
-    for i in range(len(model5_train_time)):
+    for i in range(len(model7_train_time)):
+        model7_train_time[i] -= model6_train_time[i]
         model6_train_time[i] -= model5_train_time[i]
         model5_train_time[i] -= model4_train_time[i]
         model4_train_time[i] -= model3_train_time[i]
@@ -105,39 +84,52 @@ def create_graphs():
     model4_train_time = np.array(model4_train_time)
     model5_train_time = np.array(model5_train_time)
     model6_train_time = np.array(model6_train_time)
+    model7_train_time = np.array(model7_train_time)
     total_train_time = np.array(total_train_time)
 
-    plt.plot(x, total_train_time, marker='^', label='Actual')
-    plt.title("Total training time")
-    plt.ylabel("Time (minutes)")
-    plt.xlabel("# GPUs")
+    fig, ax = plt.subplots()
 
-    ideal = [total_train_time[0]]
+    ax.plot(x, model7_train_time, marker='^', label='Actual')
+    ax.set_title("Model 6 train time")
+    ax.set_ylabel("Time (minutes)")
+    ax.set_xlabel("# GPUs")
+
+    ideal = [model7_train_time[0]]
     for i in range(1, len(total_train_time)):
-        ideal.append((ideal[0]/ (i+1)))
+        ideal.append((ideal[0]/ (2**i)))
 
-    plt.plot(x, ideal, '-', label='ideal')
+    ax.plot(x, ideal, '--', label='ideal')
 
-    plt.xticks([1, 2, 3, 4, 5, 6, 7, 8], ['1', '2', '3', '4', '5', '6', '7', '8'])
+    #ax.set_xticks([1, 2, 4, 8], ['1', '2', '4', '8'])
     #plt.ylim(bottom=0)
-    plt.xscale('log')
-    plt.yscale('log')
-    plt.legend()
+    ax.loglog()
+    ax.legend()
+    
+    for axis in [ax.xaxis, ax.yaxis]:
+        formatter = ScalarFormatter()
+        formatter.set_scientific(False)
+        formatter.set_powerlimits((-5, 5))
+        axis.set_major_formatter(formatter)
+        axis.set_minor_formatter(formatter)
     plt.show()
 
     plt.clf()
-    plt.bar(x, model1_train_time, color='r', label='Model 0')
-    plt.bar(x, model2_train_time, bottom=model1_train_time, color='b', label='Model 1')
-    plt.bar(x, model3_train_time, bottom=model2_train_time+model1_train_time, color='g', label='Model 2')
-    plt.bar(x, model4_train_time, bottom=model3_train_time+model2_train_time+model1_train_time, color='y', label='Model 3')
-    plt.bar(x, model5_train_time, bottom=model4_train_time+model3_train_time+model2_train_time+model1_train_time, color='purple', label='Model 4')
-    plt.bar(x, model6_train_time, bottom=model5_train_time+model4_train_time+model3_train_time+model2_train_time+model1_train_time, color='gray', label='Model 5')
-    plt.ylabel("Time (minutes)")
-    plt.xlabel("# GPUs")
 
-    plt.xticks([1, 2, 3, 4, 5, 6, 7, 8], ['1', '2', '3', '4', '5', '6', '7', '8'])
-    plt.legend()
-    plt.title("Training time per model")
+    fig, ax = plt.subplots()
+    x = [1, 2, 3, 4]
+    ax.bar(x, model1_train_time, color='r', label='Model 0')
+    ax.bar(x, model2_train_time, bottom=model1_train_time, color='b', label='Model 1')
+    ax.bar(x, model3_train_time, bottom=model2_train_time+model1_train_time, color='g', label='Model 2')
+    ax.bar(x, model4_train_time, bottom=model3_train_time+model2_train_time+model1_train_time, color='y', label='Model 3')
+    ax.bar(x, model5_train_time, bottom=model4_train_time+model3_train_time+model2_train_time+model1_train_time, color='purple', label='Model 4')
+    ax.bar(x, model6_train_time, bottom=model5_train_time+model4_train_time+model3_train_time+model2_train_time+model1_train_time, color='gray', label='Model 5')
+    ax.bar(x, model7_train_time, bottom=model6_train_time+model5_train_time+model4_train_time+model3_train_time+model2_train_time+model1_train_time, color='orange', label='Model 6')
+
+    ax.set_ylabel("Time (minutes)")
+    ax.set_xlabel("# GPUs")
+    plt.xticks([1, 2, 3, 4], ['1', '2', '4', '8'])
+    ax.legend()
+    ax.set_title("Training time per model")
     plt.show()
 
 if __name__ == '__main__':

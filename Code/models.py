@@ -2,7 +2,7 @@ from octree import OctreeNodeList
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utility_functions import  weights_init, 
+from utility_functions import  weights_init
 import os
 from options import save_options
 from math import pi
