@@ -107,14 +107,22 @@ def create_graphs():
     model6_train_time = np.array(model6_train_time)
     total_train_time = np.array(total_train_time)
 
-    plt.plot(x, total_train_time, marker='^')
+    plt.plot(x, total_train_time, marker='^', label='Actual')
     plt.title("Total training time")
     plt.ylabel("Time (minutes)")
     plt.xlabel("# GPUs")
 
-    plt.xticks([1, 2, 3, 4, 5, 6, 7, 8], ['1', '2', '3', '4', '5', '6', '7', '8'])
-    plt.ylim(bottom=0)
+    ideal = [total_train_time[0]]
+    for i in range(1, len(total_train_time)):
+        ideal.append((ideal[0]/ (i+1)))
 
+    plt.plot(x, ideal, '-', label='ideal')
+
+    plt.xticks([1, 2, 3, 4, 5, 6, 7, 8], ['1', '2', '3', '4', '5', '6', '7', '8'])
+    #plt.ylim(bottom=0)
+    plt.xscale('log')
+    plt.yscale('log')
+    plt.legend()
     plt.show()
 
     plt.clf()
@@ -140,11 +148,5 @@ if __name__ == '__main__':
     output_folder = os.path.join(project_folder_path, "Output")
     save_folder = os.path.join(project_folder_path, "SavedModels")
 
-    f = h5py.File("./TrainingData/channel_ts0.h5", 'r')
-    f2 = h5py.File("./TrainingData/channelflow.h5", 'w')
-    d = f['data']
-
-    f2['data'] = d[:,::2, ::2, ::2]
-    f.close()
-    f2.close()
+    create_graphs()
 
