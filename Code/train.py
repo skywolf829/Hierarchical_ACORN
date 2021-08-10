@@ -33,6 +33,7 @@ class Trainer():
     #@profile
     def train(self, rank, model, item):
         torch.manual_seed(0b10101010101010101010101010101010)
+        
         if(self.opt['train_distributed']):
             node_name = socket.gethostname()
             with open(os.environ['COBALT_NODEFILE'], 'r') as file:
