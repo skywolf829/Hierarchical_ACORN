@@ -174,7 +174,7 @@ class Trainer():
                             block_output = model.forward_global_positions(global_positions, 
                                 index_to_global_positions_indices=model_caches[(b, blocks_this_iter)],
                                 depth_start=model_num, depth_end=model_num+1,
-                                local_positions=local_positions, block_start=b, block_end=b+blocks_this_iter)
+                                local_positions=local_positions, block_start=b)
                             block_item = F.grid_sample(item.expand([-1, -1, -1, -1, -1]), 
                                 global_positions.flip(-1), mode='bilinear', align_corners=False)
                         block_error = loss(block_output,block_item) * queries * blocks_this_iter #* (blocks_this_iter/len(blocks))
