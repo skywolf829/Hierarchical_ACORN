@@ -121,6 +121,81 @@ class Reshaper(nn.Module):
     def forward(self, x):
         return x.reshape(self.s)
 
+class SinModule(nn.Module):
+    def __init__(self):
+        super(SinModule, self).__init__()
+
+    def forward(self, x):
+        return torch.sin(x)
+
+class CNRVSF(nn.Module):
+    '''
+    Code for the model from Compressive Neural Representations for Volumetric
+    Scalar Fields (CNRVSF). Model is based on the SIREN model, which uses
+    fully connected (linear) layers with sinusoidal activation functions between
+    them. CNRVSF add residual connections between every other layer to 
+    stabilize training.
+    '''
+    def __init__(self, num_layers, nodes_per_layer, num_inputs, num_outputs):
+        super(CNRVSF, self).__init__()   
+
+        # Head module is a single linear layer with sinusoidal activation,
+        # and maps the input dimensions ([x, y], [x, y, z], [x, y, t], etc...),
+        # to the number of nodes per layer
+        self.head = nn.Sequential(
+            nn.Linear(num_inputs, nodes_per_layer),
+            SinModule()
+        )
+
+        # Body module is the fully connected layers with sinusoidal
+        # actiation between them
+        self.body = nn.ModuleList([])
+        for _ in range(num_layers):
+            self.body.append(
+                nn.Sequential(
+                    nn.Linear(nodes_per_layer, nodes_per_layer),
+                    SinModule()
+                )
+            )
+            
+        # Tail module is a single linear layer that will end in
+        # the number of outputs. In their paper, num_outputs is
+        # always 1 (scalar fields), but could be multivariate 
+        # as well if num_outputs > 1
+        self.tail = nn.Linear(nodes_per_layer, num_outputs)
+
+    '''
+    The forward function can be called like so:
+    model = CNRVSF(10, 512, 3, 1)   # Make model with 10 layers, 512 nodes per layer, 3 inputs, 1 output
+    x = torch.rand([1, 3])          # Create a random input vector with 3 inputs and batch size 1 [B, N]
+    output = model(x)               # calls model.forward(x) implicitly
+    '''
+    def forward(self, x):
+        # Get output from the head of x
+        x = self.head(x)
+
+        # Clone this to a copy to use as the residual for the residual connections used in the paper
+        res = x.clone()
+
+        # Iterate through each fully connected layer in the body
+        for i in range(len(self.body)):
+            # If it is an even layer, do not add the residual connection. Otherwise, do, and update
+            # the value of the residual
+            # Note that due to their construction and this implementation, num_layers should be
+            # odd so that there are not two residual additions at the end (last layer, and then tail)
+            if i % 2 == 0:
+                x = self.body[i](x)
+            else:
+                x = self.body[i](x + res)
+                res = x.clone()
+
+        # Finally, add the residual to the last output and send it through the tail, which
+        # has no activation function
+        x = self.tail(x + res)
+
+        # Return the final value
+        return x
+
 class ACORN(nn.Module):
     def __init__(self, nodes_per_layer, opt):
         super(ACORN, self).__init__()        
