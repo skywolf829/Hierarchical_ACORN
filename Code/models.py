@@ -121,6 +121,11 @@ class Reshaper(nn.Module):
     def forward(self, x):
         return x.reshape(self.s)
 
+'''
+An extension of nn.Module that simply returns sin(x) for
+an input x. A utility to easily add a sin calculation into
+a nn.Sequential or other module.
+'''
 class SinModule(nn.Module):
     def __init__(self):
         super(SinModule, self).__init__()
@@ -157,7 +162,7 @@ class CNRVSF(nn.Module):
                     SinModule()
                 )
             )
-            
+
         # Tail module is a single linear layer that will end in
         # the number of outputs. In their paper, num_outputs is
         # always 1 (scalar fields), but could be multivariate 
