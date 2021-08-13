@@ -611,6 +611,7 @@ class HierarchicalACORN(nn.Module):
                 out_temp = self.models[model_no].FC2vol(out_temp)     
                 out += out_temp
             else:  
+
                 local_positions_at_depth = self.octree.global_to_local_batch(
                     global_positions, depth)
 
