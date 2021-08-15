@@ -557,6 +557,7 @@ class HierarchicalACORN(nn.Module):
             
         return out
 
+
     #@profile
     def forward_global_positions(self, global_positions, index_to_global_positions_indices=None, 
     depth_start=None, depth_end=None, local_positions=None, block_start=None):
@@ -589,9 +590,12 @@ class HierarchicalACORN(nn.Module):
             model_no = depth - self.opt['octree_depth_start']
 
             blocks, block_positions = self.octree.depth_to_blocks_and_block_positions(depth)
-
             block_positions = torch.tensor(block_positions, 
                     device=self.opt['device'])
+
+            if(block_start is not None and local_positions is not None and depth == depth_end-1):
+                blocks = blocks[block_start:block_start+local_positions.shape[0]]
+                block_positions = block_positions[block_start:block_start+local_positions.shape[0]]
 
             encoded_positions = self.pe(block_positions)
             feat_grids = self.models[model_no].feature_encoder(encoded_positions)
