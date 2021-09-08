@@ -593,9 +593,9 @@ class HierarchicalACORN(nn.Module):
             block_positions = torch.tensor(block_positions, 
                     device=self.opt['device'])
             
-            if(block_start is not None and local_positions is not None and depth == depth_end-1):
-                blocks = blocks[block_start:block_start+local_positions.shape[0]]
-                block_positions = block_positions[block_start:block_start+local_positions.shape[0]]
+            #if(block_start is not None and local_positions is not None and depth == depth_end-1):
+            #    blocks = blocks[block_start:block_start+local_positions.shape[0]]
+            #    block_positions = block_positions[block_start:block_start+local_positions.shape[0]]
 
             encoded_positions = self.pe(block_positions)
             feat_grids = self.models[model_no].feature_encoder(encoded_positions)
