@@ -1,29 +1,12 @@
-from math import log10
-
-from numpy.core.shape_base import block
-from utility_functions import PSNR, PSNRfromL1, local_to_global, make_coord, ssim3D, str2bool, ssim, PSNRfromMSE
+from utility_functions import PSNR, make_coord, ssim
 import torch
-from torch.nn.parallel import DistributedDataParallel as DDP
-import torch.distributed as dist
-import torch.multiprocessing as mp
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.tensorboard import SummaryWriter
 import time
-import torch.optim as optim
 import os
-from models import load_model, save_model
+from models import load_model
 import numpy as np
-from octree import OctreeNodeList
 from options import *
-from models import HierarchicalACORN, PositionalEncoding
 import argparse
-from pytorch_memlab import LineProfiler, MemReporter, profile
-from torch.utils.checkpoint import checkpoint_sequential, checkpoint
-from torch.multiprocessing import spawn
-from torch.distributed import new_group, barrier, group, broadcast
 import h5py
-import socket
 from netCDF4 import Dataset
 import imageio
 
