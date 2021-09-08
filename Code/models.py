@@ -592,7 +592,7 @@ class HierarchicalACORN(nn.Module):
             blocks, block_positions = self.octree.depth_to_blocks_and_block_positions(depth)
             block_positions = torch.tensor(block_positions, 
                     device=self.opt['device'])
-
+            
             if(block_start is not None and local_positions is not None and depth == depth_end-1):
                 blocks = blocks[block_start:block_start+local_positions.shape[0]]
                 block_positions = block_positions[block_start:block_start+local_positions.shape[0]]

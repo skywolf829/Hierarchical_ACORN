@@ -65,11 +65,6 @@ class Trainer():
 
         
 
-        #optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=model_optim,
-        #    milestones=[self.opt['epochs']/5, 
-        #    2*self.opt['epochs']/5, 
-        #    3*self.opt['epochs']/5, 
-        #    4*self.opt['epochs']/5],gamma=self.opt['gamma'])
 
         if(rank == 0 or not self.opt['train_distributed']):
             writer = SummaryWriter(os.path.join('tensorboard',self.opt['save_name']))
@@ -93,6 +88,10 @@ class Trainer():
 
             model_optim = optim.Adam(model.models[model_num].parameters(), lr=self.opt["lr"], 
                 betas=(self.opt["beta_1"],self.opt["beta_2"]))
+
+                
+            optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=model_optim,
+                milestones=[self.opt['epochs']*0.8], gamma=0.1)
 
             blocks, block_positions = model.octree.depth_to_blocks_and_block_positions(
                         model.octree.max_depth())
@@ -184,7 +183,6 @@ class Trainer():
 
                         b += blocks_this_iter
                         
-
                     if self.opt['train_distributed']:
                         # Grad averaging for dist training
                         dist.all_reduce(block_error_sum, op=dist.ReduceOp.SUM, group=g)
@@ -198,7 +196,7 @@ class Trainer():
 
                     block_error_sum /= total_queries
                     model_optim.step()
-                    #optim_scheduler.step()
+                    optim_scheduler.step()
                     
                     if(block_error_sum > best_MSE and best_MSE_epoch < epoch - 2500):
                         early_stop = True
@@ -225,8 +223,9 @@ class Trainer():
                                 block_error_sum.item()))
                         writer.add_scalar('Training PSNR', PSNRfromL1(block_error_sum, torch.tensor(1.0, device=self.opt['device'])), step)
                         writer.add_scalar('L1', block_error_sum, step)
-                        MBytes = (torch.cuda.memory_allocated(device=self.opt['device']) / (1024**2))
-                        writer.add_scalar('GPU memory (MB)', MBytes, step)
+                        
+                        GBytes = (torch.cuda.max_memory_allocated(device=self.opt['device']) / (1024**3))
+                        writer.add_scalar('GPU memory (GB)', GBytes, step)
                     step += 1
                 
                     epoch += 1
